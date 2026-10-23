@@ -1,4 +1,4 @@
-﻿# 统一用 LF：这个包要跨平台（Windows 上写、Linux 上装）
+# 统一用 LF：这个包要跨平台（Windows 上写、Linux 上装）
 * text=auto eol=lf
 *.ps1 text eol=crlf
 *.cmd text eol=crlf
