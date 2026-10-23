@@ -8,6 +8,9 @@ import { statSync } from 'node:fs'
 import { 读配置 } from './config.mjs'
 import { 跑 } from './run.mjs'
 
+const 绿 = (s) => `\x1b[32m${s}\x1b[0m`
+const 灰 = (s) => `\x1b[90m${s}\x1b[0m`
+
 export function 打开文件(路径) {
   try {
     if (process.platform === 'win32') {

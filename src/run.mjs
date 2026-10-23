@@ -72,8 +72,14 @@ export function 跑(命令, 参数 = [], 超时 = 8000) {
     const 文 = String((错 && (错.stderr || 错.message)) || 错)
     // 被沙箱拦了：换一条不靠管道的路
     if (码 === 'EPERM' || 码 === 'EACCES' || 码 === 'EPIPE' || /EPERM|EACCES|spawn .*pipe/i.test(文)) {
-      遇到过沙箱限制 = true
       const 结果 = 落盘跑(命令, 参数, 超时)
+      // ⭐ 兜底后发现是「系统里根本没有这条命令」——这是可靠结论，别标成沙箱不可信。
+      //    否则真没装 Docker 的机器会被标成「沙箱限制」，让 agent 不敢下判断。
+      const 真没有 = /(is not recognized|不是内部或外部命令|无法将.*识别|command not found|No such file or directory)/i.test(
+        结果.错,
+      )
+      if (真没有) return { ok: false, 出: 结果.出, 错: 结果.错 }
+      遇到过沙箱限制 = true
       return { ...结果, 沙箱: true }
     }
     return { ok: false, 出: String((错 && 错.stdout) || '').trim(), 错: 文.trim() }

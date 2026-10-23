@@ -121,6 +121,19 @@ function 读模块(目录) {
   return { 目录, 名字: j.name, 版本: j.version, 路径: join(包根, 'runtime', 目录) }
 }
 
+/** 目录指纹的短串：排序后的「路径 + 内容哈希」再算一个 sha256（给安装清单用）。 */
+function 目录指纹串(目录) {
+  const 表 = 目录指纹(目录)
+  const h = createHash('sha256')
+  for (const k of [...表.keys()].sort()) {
+    h.update(k.replace(/\\/g, '/'))
+    h.update(':')
+    h.update(表.get(k))
+    h.update(';')
+  }
+  return h.digest('hex').slice(0, 16)
+}
+
 function 找Profile(指定) {
   if (指定) return resolve(指定)
   if (process.env.DSH_PROFILE_DIR) return resolve(process.env.DSH_PROFILE_DIR)
@@ -141,11 +154,21 @@ export async function install(选项 = {}) {
   // ---------- 1. profile 得像个 profile ----------
   const pkgPath = join(profile, 'package.json')
   const nm = join(profile, 'node_modules')
-  if (!existsSync(pkgPath) || !existsSync(nm)) {
+  if (!existsSync(pkgPath)) {
     console.log(红('✗ 这不像一个 DSH profile'))
-    console.log(灰('  要同时有 package.json 和 node_modules/'))
+    console.log(灰('  缺 package.json'))
     console.log(灰('  用 --profile 指一个，或设 DSH_PROFILE_DIR'))
     return 1
+  }
+  if (!existsSync(nm)) {
+    // 干净机器上 DSH 的 profile 可能还没有 node_modules —— 帮它建一个空的就行
+    try {
+      mkdirSync(nm, { recursive: true })
+      console.log(灰('· node_modules 不存在，已建一个空的'))
+    } catch (错) {
+      console.log(红('✗ 建不了 node_modules：') + String(错.message || 错))
+      return 1
+    }
   }
   let pkg
   try {
@@ -159,6 +182,16 @@ export async function install(选项 = {}) {
   console.log(绿('✓') + ` profile：${pkg.name || '(无名)'}`)
 
   // ---------- 2. 清单 ----------
+  const 家 = process.env.DSH_HOME || join(homedir(), '.dsh')
+  const qiyu家 = join(家, 'qiyu')
+  const 清单路径 = join(qiyu家, 'install-manifest.json')
+  let 旧清单 = null
+  try {
+    旧清单 = JSON.parse(readFileSync(清单路径, 'utf8'))
+  } catch {
+    旧清单 = null
+  }
+
   const 模块们 = 模块目录
     .filter((d) => !只装 || 只装.includes(d))
     .map(读模块)
@@ -175,7 +208,9 @@ export async function install(选项 = {}) {
     const 已有 = existsSync(目标)
     const 已在依赖 = Boolean(pkg.dependencies && pkg.dependencies[m.名字])
     const 已在bundles = Boolean(pkg.dsh && pkg.dsh.profile && (pkg.dsh.profile.bundles || []).includes(m.名字))
-    计划.push({ ...m, 目标, 已有, 已在依赖, 已在bundles })
+    const 上次 = 旧清单 && 旧清单.模块 && 旧清单.模块[m.名字]
+    const 本地改过 = Boolean(已有 && 上次 && 上次.指纹 && 目录指纹串(目标) !== 上次.指纹)
+    计划.push({ ...m, 目标, 已有, 已在依赖, 已在bundles, 本地改过 })
   }
 
   console.log('')
@@ -185,9 +220,11 @@ export async function install(选项 = {}) {
       ? 绿('新装')
       : 覆盖
         ? 黄('已存在，要覆盖')
-        : 代码一致(p.路径, p.目标)
-          ? 灰('已是最新')
-          : 黄('有更新，会整份替换')
+        : p.本地改过
+          ? 黄('本地改过，会保留（要覆盖加 --force）')
+          : 代码一致(p.路径, p.目标)
+            ? 灰('已是最新')
+            : 黄('有更新，会整份替换')
     console.log(`  ${p.目录.padEnd(8)} ${p.名字.padEnd(18)} v${String(p.版本 || '?').padEnd(8)} ${状态}`)
   }
 
@@ -234,7 +271,10 @@ export async function install(选项 = {}) {
       //    以前只看目录在不在，导致：改了代码但目录还在 → 跳过 → 装着旧代码；
       //    文件改名（比如新加 voice.mjs）→ 只补新文件、旧的还留着 → 半新半旧。
       const 代码一样 = p.已有 && !覆盖 && 代码一致(p.路径, p.目标)
-      if (!代码一样) {
+      if (p.本地改过 && !覆盖) {
+        // ⭐ 本地改过的模块（比如自己打了补丁）默认保留：普通 install 也不该悄悄覆盖它
+        console.log(黄(`· ${p.名字}：和上次装的不一样（可能你本地改过），保留不动；要覆盖加 --force`))
+      } else if (!代码一样) {
         if (p.已有) {
           const 备份 = `${p.目标}.bak-qiyuinstall-${ts}`
           renameSync(p.目标, 备份)
@@ -281,9 +321,25 @@ export async function install(选项 = {}) {
   }
   if (装了) console.log(灰(`  稳定副本在：${稳定根}（依赖指向这里，跟 qiyu 包的位置无关）`))
 
+  // ---------- 4.1 安装清单：下次据此判断「本地改过」 ----------
+  try {
+    const 栈版本 = JSON.parse(readFileSync(join(包根, 'package.json'), 'utf8')).version || '?'
+    const 清单 = { 版本: 栈版本, 时间: new Date().toISOString(), 模块: {} }
+    for (const p of 计划) {
+      if (!existsSync(p.目标)) continue
+      const 上次 = 旧清单 && 旧清单.模块 && 旧清单.模块[p.名字]
+      const 跳过 = p.本地改过 && !覆盖
+      // 跳过时记"上次装进去的东西"；没有旧记录就记源码指纹（下次照样能发现本地改动）
+      清单.模块[p.名字] = { 指纹: 跳过 ? (上次 && 上次.指纹) || 目录指纹串(p.路径) : 目录指纹串(p.目标) }
+    }
+    mkdirSync(qiyu家, { recursive: true })
+    writeFileSync(清单路径, JSON.stringify(清单, null, 2) + '\n', 'utf8')
+    console.log(灰(`  安装清单：${清单路径}`))
+  } catch (错) {
+    console.log(黄('· 安装清单没写成（不影响使用）：') + String(错.message || 错))
+  }
+
   // ---------- 4.5 语音转写脚本 + 活动角色，落到 $DSH_HOME/qiyu ----------
-  const 家 = process.env.DSH_HOME || join(homedir(), '.dsh')
-  const qiyu家 = join(家, 'qiyu')
 
   // ---------- 4.4 版本记录：设置面板的「版本」页签读它 ----------
   try {
@@ -373,6 +429,7 @@ export async function install(选项 = {}) {
     const 本机 = 读配置()
     const 该填 = {
       NapCat: (本机.napcat && 本机.napcat.http) || 'http://127.0.0.1:3000',
+      容器: (本机.napcat && 本机.napcat.container) || '',
       令牌: (本机.napcat && 本机.napcat.token) || '',
       事件地址: (本机.napcat && 本机.napcat.ws) || 'ws://127.0.0.1:3001/',
       事件令牌: (本机.napcat && 本机.napcat.wsToken) || '',

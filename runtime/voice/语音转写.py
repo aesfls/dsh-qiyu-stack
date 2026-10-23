@@ -10,10 +10,13 @@ import sys
 import tempfile
 import wave
 
-ROOT = r"W:\AI\DeepSeek小助手\video-agent"
-PYLIBS = os.path.join(ROOT, "pylibs")
-MODEL = os.path.join(ROOT, "models", "model.int8.onnx")
-TOKENS = os.path.join(ROOT, "models", "tokens.txt")
+# 模型/依赖放在哪：
+#   QIYU_STT_ROOT 指定根目录；不设就用脚本自己所在的目录（install 会把脚本放到 ~/.dsh/qiyu/）
+#   也支持分别用 QIYU_STT_PYLIBS / QIYU_STT_MODEL / QIYU_STT_TOKENS 覆盖
+ROOT = os.environ.get("QIYU_STT_ROOT") or os.path.dirname(os.path.abspath(__file__))
+PYLIBS = os.environ.get("QIYU_STT_PYLIBS") or os.path.join(ROOT, "pylibs")
+MODEL = os.environ.get("QIYU_STT_MODEL") or os.path.join(ROOT, "models", "model.int8.onnx")
+TOKENS = os.environ.get("QIYU_STT_TOKENS") or os.path.join(ROOT, "models", "tokens.txt")
 TARGET_RATE = 16000
 
 if PYLIBS not in sys.path:

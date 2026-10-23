@@ -14,6 +14,8 @@ export const 默认配置 = {
     webui: 'http://127.0.0.1:6099',
     token: '',
     wsToken: '',
+    // 自定义安装的 Docker Desktop 路径（空 = 自动找：环境变量 > where docker > 默认路径）
+    dockerDesktop: '',
   },
   dsh: {
     port: 0, // 0 = 不知道。端口每台机器都不一样，绝不写死一个数

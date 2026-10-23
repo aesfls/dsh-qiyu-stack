@@ -4,9 +4,9 @@
 
 ## 一句话状态
 
-**能用了，也发出去了，但还没被陌生人在干净机器上验证过。**
+**能用了，也发出去了，干净机器已经装通；实测那批问题在 0.15.8 修了。**
 
-- npm：`dsh-qiyu-stack@0.15.7`（`latest`）
+- npm：`dsh-qiyu-stack@0.15.8`（`latest`）
 - GitHub：<https://github.com/aesfls/dsh-qiyu-stack>（公开，main）
 - 千语（爸爸本人的实例）：正常运行中，桥、NapCat、Docker 都通
 
@@ -17,6 +17,32 @@
 - `qiyu install` 会把当前版本这段写进 `~/.dsh/qiyu/version.json`
 - 设置里「栖语 → 版本」页签显示版本、安装时间、这次更新内容、各运行时版本
 - `qiyu handover` 也会把它写进 `交接.md`
+
+## 2026-10-23 第七轮：干净机器实测 34 项，修 12 项项目问题（v0.15.8）
+
+一台纯净 Windows 11（Administrator，无 Docker/WSL/Python/git）从零装通：Docker/WSL 自装、扫码、
+桥、真实 QQ 私聊、TTS 语音、handover 都过了。对方记了 34 项问题（项目 12 / 环境 15 / 操作 7），
+逐条对过代码，这 12 项都成立，已修：
+
+1. `qiyu qr` 崩（`绿` 未定义）
+2. `qq_voice` 的 `合成语音` 作用域
+3. `语音转写.py` 写死作者 `W:\` 路径
+4. 默认身份表是「爸爸/妈妈」（违反红线）——改空；设了 `主人` 就按「备注 = 称呼」兜底
+5. `qq_voice` 说明硬编码爸爸/妈妈
+6. 干净 profile 没有 `node_modules` 时 install 拒绝 → 自动建
+7. Docker Desktop 自定义路径（qiyu + 桥两处）→ 环境变量 / 配置 / `where docker` 反推
+8. 真没装 Docker 被标成「沙箱限制」→ `run.mjs` 区分「命令不存在」
+9. `doctor` 新增身份检查（好友备注一个都认不出 → warn）
+10. 面板介绍去掉「刷 B 站」；README 写明不在本栈范围
+11. `install` 安装清单：本地改过的模块默认保留，`--force` 才覆盖
+12. `AGENTS.md` 补 `npm.cmd` / `npm_config_cache` 两个必踩点
+13. 桥补一条自愈：引擎在、容器被杀过（exit 137）时自己 `docker start`；`install` 把 `容器` 写进桥配置
+
+还留着：
+
+- `#21` 保存目标会话后被清空（未复现，先记为待查）
+- `#30` Docker 重启后快速登录偶尔失效（NapCat 行为，文档已提示勾「下次登录无需确认」）
+- 测试机上那两个本地补丁（Docker 路径 + `qq_voice`）升到 0.15.8 后可以删掉，新版已内置
 
 ## 2026-10-23 第六轮：把「第六步」补上（v0.15.7）
 

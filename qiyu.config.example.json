@@ -5,10 +5,11 @@
     "ws": "ws://127.0.0.1:3001/",
     "webui": "http://127.0.0.1:6099",
     "token": "",
-    "wsToken": ""
+    "wsToken": "",
+    "dockerDesktop": ""
   },
   "dsh": {
-    "port": 55861
+    "port": 0
   },
   "character": "characters"
 }

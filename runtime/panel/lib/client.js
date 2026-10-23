@@ -101,7 +101,7 @@ window.__ModuleLoader__.load({
         'div',
         { style: S.wrap },
         h('div', { style: S.head }, '栖语'),
-        h('div', { style: S.intro }, '住在这里的几件事：QQ、心情、记忆、主动搭话、刷 B 站。'),
+        h('div', { style: S.intro }, '住在这里的几件事：QQ、心情、记忆、主动搭话。'),
 
         rows.length === 0
           ? h('div', { style: S.empty }, '还没有插件注册页签到 qiyu.tab。')

@@ -7,8 +7,9 @@
 //      我们在 ensure 之前顺手把它写进配置（写失败了也不影响启动）。
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { 跑 } from './run.mjs'
+import { 读配置 } from './config.mjs'
 
 const 绿 = (s) => `\x1b[32m${s}\x1b[0m`
 const 黄 = (s) => `\x1b[33m${s}\x1b[0m`
@@ -25,10 +26,42 @@ export async function 命令行在吗() {
   return r.ok
 }
 
-const DockerDesktop候选 = [
-  'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe',
-  join(process.env.LOCALAPPDATA || '', 'Docker', 'Docker Desktop.exe'),
-]
+/**
+ * Docker Desktop.exe 可能在哪：
+ *   环境变量 QIYU_DOCKER_DESKTOP > qiyu.config.json 的 napcat.dockerDesktop
+ *   > 从 `where docker` 反推（...\Docker\resources\bin\docker.exe → ...\Docker\Docker Desktop.exe）
+ *   > 默认安装路径
+ */
+function DockerDesktop候选() {
+  const 列 = []
+  const 加 = (p) => {
+    const t = String(p || '').trim()
+    if (t && !列.includes(t)) 列.push(t)
+  }
+
+  加(process.env.QIYU_DOCKER_DESKTOP)
+  try {
+    加(读配置().napcat && 读配置().napcat.dockerDesktop)
+  } catch {
+    /* 配置读不到就算了 */
+  }
+  try {
+    const r = 跑('where', ['docker'], 5000)
+    const 第一行 = r.ok
+      ? String(r.出)
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .find(Boolean)
+      : ''
+    if (第一行) 加(join(dirname(dirname(dirname(第一行))), 'Docker Desktop.exe'))
+  } catch {
+    /* 没有 where / 没有 docker */
+  }
+
+  加('C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe')
+  加(join(process.env.LOCALAPPDATA || '', 'Docker', 'Docker Desktop.exe'))
+  return 列
+}
 
 /** 把「启动时不弹面板」写进 Docker Desktop 的设置（失败就算了，不影响启动）。 */
 function 静默化设置() {
@@ -50,7 +83,7 @@ function 静默化设置() {
  */
 export async function 确保引擎({ 等秒 = 120, 说 = () => {} } = {}) {
   if (await 引擎版本()) return true
-  const exe = DockerDesktop候选.find((p) => {
+  const exe = DockerDesktop候选().find((p) => {
     try {
       return existsSync(p)
     } catch {

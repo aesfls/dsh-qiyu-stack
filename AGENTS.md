@@ -20,6 +20,12 @@ npx dsh-qiyu-stack doctor --json      # 5. 验收
 
 **不要 `git clone` 仓库**——`npx` 就够了，clone 反而会让人以为要改源码。
 
+## 干净机器上的两个必踩点（Windows）
+
+- **PowerShell 执行策略会拦 `npm.ps1` / `npx.ps1`**：改用 `npm.cmd` / `npx.cmd`（不要去改系统执行策略）
+- **第一次 `npx` 之前先设工作区缓存**：`$env:npm_config_cache = "$PWD\.npm-cache"`
+  （沙箱下 npm 写用户缓存会被拒，报 `EPERM`）
+
 ## 第六步：给她一个会话（命令装不出来，必须人来做）
 
 五条命令只装东西，**不会创建 DSH 工作区，也不会创建会话**。装完还要人工做三件：

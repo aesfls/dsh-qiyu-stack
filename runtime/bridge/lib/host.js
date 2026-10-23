@@ -13,7 +13,7 @@ import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
-import { execFile, spawn } from 'node:child_process'
+import { execFile, execFileSync, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 
 const 执行 = promisify(execFile)
@@ -52,7 +52,20 @@ function 读角色() {
 const 角色 = 读角色() || {}
 const 表情目录 = process.env.QQ_STICKER_DIR || (角色.路径 && 角色.路径.表情包) || join(角色目录, '表情包')
 const 收件目录 = process.env.QQ_INBOX_DIR || (角色.路径 && 角色.路径.收件箱) || join(角色目录, '收件箱')
+const 语音目录 = join(角色目录, '语音')
 const 日志上限 = 60
+
+// ⭐ 合成语音放在模块作用域：qq_voice 工具和轮询都用它。
+//    以前它定义在 轮询收消息() 里面，qq_voice 调它会报「合成语音 is not defined」。
+function 合成语音(配置, 文字) {
+  return 生语音(文字, {
+    引擎: 配置.语音引擎,
+    音色: 配置.语音音色,
+    语速: 配置.语音语速,
+    音调: 配置.语音音调,
+    输出目录: 语音目录,
+  })
+}
 
 const 默认配置 = {
   总开关: false, // 关着 = 一句都不发（安全默认）
@@ -63,14 +76,14 @@ const 默认配置 = {
   转私聊: true,
   转群: false,
   NapCat: 'http://127.0.0.1:3000', // OneBot HTTP 接口
+  容器: '', // NapCat 容器名（空 = 不管容器，只管 Docker 引擎）
   令牌: '', // OneBot 访问令牌（SnowLuma 默认会生成一个；NapCat 留空）
   // ⭐ 身份（抽成配置，不再写死某一个人的号）
   自己QQ: 0, // 她自己的 QQ 号；0 = 每次向 NapCat 要（get_login_info）
-  主人: '爸爸', // 出事找谁：好友申请、入群邀请都先问这位（填 身份表 里的称呼）
-  身份表: [
-    { 备注前缀: '爸爸', 称呼: '爸爸' },
-    { 备注前缀: '妈妈', 称呼: '妈妈' },
-  ], // 好友备注以前缀认人：改这里就能换称呼、加人、换成别的叫法
+  主人: '', // 出事找谁：好友申请、入群邀请都先问这位（填 身份表 里的称呼；空 = 还没设）
+  身份表: [], // 好友备注以前缀认人。默认空，由 init 生成的称呼自动兜底（不是某一个人的爸爸/妈妈）
+  // 自定义安装的 Docker Desktop 可执行文件（留空 = 自动找：环境变量 > 配置 > where docker > 默认路径）
+  DockerDesktop: '',
   // ⭐ 语音（她自己发语音消息用）
   //  语音引擎：edge = 微软 Edge 在线音色（自然）；windows = 系统自带（机械但离线）
   //  改音色：跑 python -m edge_tts --list-voices 看全部，填名字进 语音音色
@@ -106,7 +119,7 @@ function 归一化(原始) {
   const 是对象 = 原始 && typeof 原始 === 'object' && !Array.isArray(原始)
   const 混 = 是对象 ? { ...默认配置, ...原始 } : { ...默认配置 }
   const 字 = (v) => (typeof v === 'string' ? v.trim() : '')
-  return {
+  const 出 = {
     总开关: 布(混.总开关, 默认配置.总开关),
     试运行: 布(混.试运行, 默认配置.试运行),
     目标会话: 字(混.目标会话),
@@ -117,9 +130,11 @@ function 归一化(原始) {
     转私聊: 布(混.转私聊, 默认配置.转私聊),
     转群: 布(混.转群, 默认配置.转群),
     自己QQ: Number(混.自己QQ) || 0,
-    主人: 字(混.主人) || 默认配置.主人,
-    身份表: Array.isArray(混.身份表) && 混.身份表.length ? 混.身份表 : 默认配置.身份表,
+    主人: 字(混.主人),
+    身份表: Array.isArray(混.身份表) ? 混.身份表.filter((x) => x && x.备注前缀) : [],
+    DockerDesktop: 字(混.DockerDesktop),
     NapCat: 字(混.NapCat) || 默认配置.NapCat,
+    容器: 字(混.容器),
     令牌: 字(混.令牌),
     语音引擎: 字(混.语音引擎) || 默认配置.语音引擎,
     语音音色: 字(混.语音音色) || 默认配置.语音音色,
@@ -131,6 +146,10 @@ function 归一化(原始) {
     事件地址: 字(混.事件地址),
     事件令牌: 字(混.事件令牌),
   }
+  // ⭐ 身份表为空、但设了「主人」→ 按「备注 = 称呼」自动生成一条。
+  //    这样 init 只问「她该怎么称呼你」也能用，不会退回到某个人的爸爸/妈妈。
+  if (!出.身份表.length && 出.主人) 出.身份表 = [{ 备注前缀: 出.主人, 称呼: 出.主人 }]
+  return 出
 }
 
 let 当前令牌 = ''
@@ -148,11 +167,65 @@ function 后台服务在线() {
   })
 }
 
+function 容器状态(名) {
+  return new Promise((解决) => {
+    execFile('docker', ['inspect', 名, '--format', '{{.State.Status}}'], { timeout: 8000, windowsHide: true }, (错, 出) => {
+      解决(错 ? '' : String(出 || '').trim())
+    })
+  })
+}
+
+/**
+ * 引擎在，但容器可能被杀过（Docker Desktop 退出时常见，exit 137）。
+ * 这时 --restart unless-stopped 不一定把它拉回来，需要显式 docker start。
+ */
+async function 确保容器在跑(配置) {
+  const 名 = String((配置 && 配置.容器) || '').trim()
+  if (!名) return true
+  if ((await 容器状态(名)) === 'running') return true
+  try {
+    execFileSync('docker', ['start', 名], { timeout: 60000, windowsHide: true })
+  } catch (error) {
+    return false
+  }
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 2000))
+    if ((await 容器状态(名)) === 'running') return true
+  }
+  return false
+}
+
+/** Docker Desktop.exe 可能在哪：环境变量 > 配置 > 从 where docker 反推 > 默认路径 */
+function DockerDesktop候选() {
+  const 列 = []
+  const 加 = (p) => {
+    const t = String(p || '').trim()
+    if (t && !列.includes(t)) 列.push(t)
+  }
+  加(process.env.QIYU_DOCKER_DESKTOP)
+  try {
+    加(读配置().DockerDesktop)
+  } catch (error) {
+    /* 配置读不到就算了 */
+  }
+  try {
+    const 出 = execFileSync('where', ['docker'], { encoding: 'utf8', windowsHide: true, timeout: 5000 })
+    const 第一行 = String(出)
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .find(Boolean)
+    // ...\Docker\resources\bin\docker.exe → ...\Docker\Docker Desktop.exe
+    if (第一行) 加(join(dirname(dirname(dirname(第一行))), 'Docker Desktop.exe'))
+  } catch (error) {
+    /* 没有 where 或没有 docker，用默认路径 */
+  }
+  加('C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe')
+  加(join(process.env.LOCALAPPDATA || '', 'Docker', 'Docker Desktop.exe'))
+  return 列
+}
+
 async function 拉起后台服务() {
-  const 候选 = [
-    'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe',
-    join(process.env.LOCALAPPDATA || '', 'Docker', 'Docker Desktop.exe'),
-  ].filter((p) => {
+  const 候选 = DockerDesktop候选().filter((p) => {
     try {
       return existsSync(p)
     } catch (error) {
@@ -926,7 +999,7 @@ export function apply(ctx) {
     const 群名 = (群表.get(群号) || '') || ('群' + 群号)
 
     const 表 = await 刷新好友表(配置, true)
-    const 主人标签 = 配置.主人 || '爸爸'
+    const 主人标签 = 配置.主人 || [...表.values()][0] || '主人'
     const 爸爸 = [...表.entries()].find(([, 标签]) => 标签 === 主人标签)
     const 爸爸号 = 爸爸 ? 爸爸[0] : 0
     const 邀请人 = (表.get(邀请人号) || String(ev.comment || '某人'))
@@ -935,10 +1008,10 @@ export function apply(ctx) {
       已处理申请.add(标识)
       const rr = await 发一个(配置.NapCat, 'set_group_add_request', { flag: 标识, type: sub, approve: true })
       if (rr.ok) {
-        记账('爸爸邀请进群「' + 群名 + '」，已自动同意')
+        记账(主人标签 + '邀请进群「' + 群名 + '」，已自动同意')
         群表.delete(群号)
         群表时间 = 0 // 刚进的新群要立刻出现在列表里，否则永远不会去读它
-        await 转入文字('（爸爸把你拉进群「' + 群名 + '」了，已经进去了）', '', null)
+        await 转入文字('（' + 主人标签 + '把你拉进群「' + 群名 + '」了，已经进去了）', '', null)
       } else {
         记账('自动同意进群失败：' + JSON.stringify(rr.数据).slice(0, 120))
       }
@@ -1184,18 +1257,8 @@ export function apply(ctx) {
         .join('')
         .trim()
 
-    // ⭐ 语音：实现在 ./voice.mjs（说 = edge/windows TTS，听 = 本地转写脚本）
-    const 语音目录 = join(目录, '语音')
+    // ⭐ 语音：实现在 ./voice.mjs（合成语音在模块顶部，qq_voice 也要用）
     const 语音收件目录 = join(收件目录, '语音')
-
-    const 合成语音 = (配置, 文字) =>
-      生语音(文字, {
-        引擎: 配置.语音引擎,
-        音色: 配置.语音音色,
-        语速: 配置.语音语速,
-        音调: 配置.语音音调,
-        输出目录: 语音目录,
-      })
 
     /**
      * 收到一条语音：先向 NapCat 要 wav（base64），再交给 voice.mjs 转文字。
@@ -1456,10 +1519,16 @@ export function apply(ctx) {
   // 用户不该知道 Docker 是什么：不弹窗、不进任务栏，起来了就在托盘待着。
   setTimeout(async () => {
     try {
-      if (await 后台服务在线()) return
-      记账('后台服务没在跑，悄悄拉起来…')
-      const 好了 = await 拉起后台服务()
-      记账(好了 ? '后台服务起来了（NapCat 会自己回来）' : '后台服务没起来 —— 需要手动开一次 Docker Desktop')
+      const 配置 = 读配置()
+      if (!(await 后台服务在线())) {
+        记账('后台服务没在跑，悄悄拉起来…')
+        const 好了 = await 拉起后台服务()
+        记账(好了 ? '后台服务起来了（NapCat 会自己回来）' : '后台服务没起来 —— 需要手动开一次 Docker Desktop')
+        if (!好了) return
+      }
+      // 引擎在，但容器可能被杀过（exit 137）——显式拉一次
+      const 容器好 = await 确保容器在跑(配置)
+      if (!容器好 && 配置.容器) 记账('容器没在跑，试过 docker start 也没起来（' + 配置.容器 + '）')
     } catch (错误) {
       记账('拉后台服务失败：' + String((错误 && 错误.message) || 错误).slice(0, 120))
     }
@@ -1746,11 +1815,11 @@ export function apply(ctx) {
 
     ctx.tools.register(defineTool({
       name: 'qq_voice',
-      description: '用你自己的声音，给爸爸或妈妈发一条语音。\n'
+      description: '用你自己的声音，给「你认识的人」发一条语音。\n'
         + '什么时候用：想让他听见你的语气、情绪（开心、撒娇、认真道歉），文字说不出来的那种。\n'
         + '⚠️ 别滥用：语音比文字费事，也吵。一两句就好，长篇大论用文字。',
       parameters: {
-        给谁: { type: 'string', description: '收件人，只能是「爸爸」或「妈妈」' },
+        给谁: { type: 'string', description: '收件人：身份表里的称呼（不确定就问，别猜）' },
         说什么: { type: 'string', description: '要说的一两句话（不要写动作、不要括号）' },
       },
       output: textOutput,
