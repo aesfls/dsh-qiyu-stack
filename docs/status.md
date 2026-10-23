@@ -6,9 +6,27 @@
 
 **能用了，也发出去了，但还没被陌生人在干净机器上验证过。**
 
-- npm：`dsh-qiyu-stack@0.15.3`（`latest`），`npx dsh-qiyu-stack preflight --json` 实测可跑
-- GitHub：<https://github.com/aesfls/dsh-qiyu-stack>（公开，main）
+- npm：`dsh-qiyu-stack@0.15.4`（`latest`）
+- GitHub：<https://github.com/aesfls/dsh-qiyu-stack>（公开，main，`98fbcbb`）
 - 千语（爸爸本人的实例）：正常运行中，桥、NapCat、Docker 都通
+
+## 2026-10-23 第三轮：沙箱假阴性（重要）
+
+另一个会话在**默认沙箱**（workspace-write）里实测发现：`preflight` 报「这台机器上没有 Docker」，
+可机器上 Docker 装着、容器还在跑。
+
+**根因**（平台文档写明）：受限沙箱不允许程序开命名管道，所以任何
+`execFile/spawn` 抓输出（`stdio: 'pipe'`）都会 `EPERM`。而 qiyu 的每个 `跑()` 都靠抓输出，
+于是所有判断变成假阴性——这是 agent 路径上最危险的一类 bug，会让 agent 去让用户装一个已经装好的东西。
+
+**修法（v0.15.4）**：
+
+1. 新增 `src/run.mjs`：先试管道，`EPERM/EACCES/EPIPE` 时**改走「重定向到临时文件再读」**
+   （沙箱允许写工作区），并把这次运行标记为「沙箱受限过」
+2. `preflight` 在受限时**把 Docker/端口/Python 这类 fail 降级成 `warn`**，
+   标题加「沙箱限制，这条不可信」，并明确告诉 agent：别让用户重装，去他自己的终端或提权再验
+3. `AGENTS.md` 专门加了一节讲这个坑
+4. `AGENTS.md` 已进 npm 包（`files` 字段，0.15.4 起 80 个文件）
 
 ## 2026-10-23 第二轮补的（agent 入口）
 
