@@ -4,11 +4,22 @@
 
 ## 一句话状态
 
-**能用了，也发出去了，但还没被陌生人验证过。**
+**能用了，也发出去了，但还没被陌生人在干净机器上验证过。**
 
-- npm：`dsh-qiyu-stack@0.15.1`（`latest`），`npx dsh-qiyu-stack help` 实测可跑
+- npm：`dsh-qiyu-stack@0.15.3`（`latest`），`npx dsh-qiyu-stack preflight --json` 实测可跑
 - GitHub：<https://github.com/aesfls/dsh-qiyu-stack>（公开，main）
 - 千语（爸爸本人的实例）：正常运行中，桥、NapCat、Docker 都通
+
+## 2026-10-23 第二轮补的（agent 入口）
+
+一个陌生人会话实测后提的问题，采纳了三条：
+
+1. **仓库根 `AGENTS.md`**：给部署助手看的说明书——五条命令、必须先问的（QQ 号/角色名）、
+   沙箱和提权是**默认路径**不是意外、必须交还给人做的四件事（装 Docker / 重启 DSH / 扫码 / 勾确认框）、
+   千万别碰的东西（角色包、`~/.dsh/AGENTS.md`）、验收标准
+2. **`preflight --json` / `doctor --json`**：让 agent 机器判断卡在哪，别去正则扒中文
+3. **`install` 交接语**：改成「重启后回这个会话，或开新会话跑 doctor --json 贴回来」，
+   并写明**「不是重新开始」**
 
 ## 今天做了什么
 

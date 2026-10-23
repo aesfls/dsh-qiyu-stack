@@ -46,6 +46,7 @@ const 帮助 = `
                                 （不假设 Docker 已经装了）
        --fix                    能修的帮你修：启动 Docker 引擎、停掉占端口的容器、装 edge-tts
                                 （每一项都会先问一句，非交互环境不动手）
+       --json                   只输出 JSON（给 agent / 脚本判断用）
 
   qiyu deploy                   一条命令起 NapCat：建目录、写 OneBot 配置、跑容器、出码
        --dir <目录>             数据放哪（默认挑非系统盘里空间最大的；会检查空间和中文路径）
@@ -113,7 +114,7 @@ async function 主() {
   }
 
   if (命令 === 'preflight' || 命令 === 'check') {
-    return await preflight({ 修复: 有开关('--fix') })
+    return await preflight({ 修复: 有开关('--fix'), 只输出JSON: 有开关('--json') })
   }
 
   if (命令 === 'qr' || 命令 === 'login') {

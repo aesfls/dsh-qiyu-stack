@@ -362,6 +362,22 @@ export async function preflight(选项 = {}) {
   const 疑 = 结果.filter((x) => x.级别 === 'warn').length
   let 坏数 = 坏
 
+  // 给 agent 用的机器可读输出：别让模型去正则扒中文
+  if (选项.只输出JSON) {
+    const 输出 = {
+      ok: 坏 === 0,
+      统计: {
+        好: 结果.filter((x) => x.级别 === 'ok').length,
+        待看: 疑,
+        不通: 坏,
+      },
+      结果: 结果.map((x) => ({ 级别: x.级别, 标题: x.标题, 依据: x.依据 || '', 怎么修: x.怎么修 || '' })),
+      下一步: 坏 === 0 ? '可以往下走：init → deploy → install' : '先解决 fail 的项，再往下走',
+    }
+    console.log(JSON.stringify(输出, null, 2))
+    return 坏 ? 1 : 0
+  }
+
   console.log('')
   console.log('栖语栈 · 装之前先看这台机器')
   console.log('─'.repeat(52))

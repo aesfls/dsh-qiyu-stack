@@ -133,12 +133,15 @@ characters/小满/              你的角色包（不进版本库）
 **已发布**：[npm](https://www.npmjs.com/package/dsh-qiyu-stack) · [GitHub](https://github.com/aesfls/dsh-qiyu-stack)
 
 ```bash
-npx dsh-qiyu-stack preflight    # 环境体检
+npx dsh-qiyu-stack preflight    # 环境体检（加 --json 给 agent 用）
 npx dsh-qiyu-stack init         # 建角色（向导）
 npx dsh-qiyu-stack deploy --qq <号>   # 起 NapCat + 出码
 npx dsh-qiyu-stack install --character <名字> --yes   # 装进 DSH
-npx dsh-qiyu-stack doctor       # 自检
+npx dsh-qiyu-stack doctor       # 自检（加 --json 给 agent 用）
 ```
+
+> 让 AI 帮你装？把这个仓库地址丢给它就行 —— 根目录的 [AGENTS.md](AGENTS.md) 是给 agent 看的说明书。
+> 它知道自己能做什么、哪些必须交还给人（装 Docker、重启 DSH、手机扫码）。
 
 已经能用：
 
