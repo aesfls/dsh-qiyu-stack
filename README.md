@@ -128,42 +128,42 @@ characters/小满/              你的角色包（不进版本库）
 
 ---
 
-## 现在的进度（v0.9）
+## 进度（v0.15.1，2026-10-23）
+
+**已发布**：[npm](https://www.npmjs.com/package/dsh-qiyu-stack) · [GitHub](https://github.com/aesfls/dsh-qiyu-stack)
+
+```bash
+npx dsh-qiyu-stack preflight    # 环境体检
+npx dsh-qiyu-stack init         # 建角色（向导）
+npx dsh-qiyu-stack deploy --qq <号>   # 起 NapCat + 出码
+npx dsh-qiyu-stack install --character <名字> --yes   # 装进 DSH
+npx dsh-qiyu-stack doctor       # 自检
+```
 
 已经能用：
 
-- [x] **`qiyu init` 向导**：问名字、QQ、称呼、作息、性格、「能不能自己改性格」；
-      每个问题都有默认值，回车就过；带名字调用则全用默认值（给脚本用）
-- [x] **`qiyu deploy`** 一条命令起 NapCat：查 Docker → 查端口 → 建目录 → 写 OneBot/WebUI 配置
-      → 拉镜像 → 跑容器 → 等 WebUI → **直接打开二维码**；令牌自动生成并写回 `qiyu.config.json`
-- [x] `qiyu doctor` 全链路自检 + **模板体检**（扫出别人的路径/名字/QQ号/令牌）
-- [x] `qiyu qr` 取登录二维码并**自动打开**（不是甩个路径让你自己找）
-- [x] `tools/merge-settings-tabs.mjs` 一条命令把五六个插件的设置收进「插件」页做页签，
-      带 `--dry-run` / `--restore`（见 [docs/settings-tabs.md](docs/settings-tabs.md)）
-- [x] 部署文档：Docker + NapCat + 一个必勾的「下次登录无需确认」
-- [x] 行为层人格模板
-- [x] 默认值红线：中性默认 + 本机配置分离（见 [docs/conventions.md](docs/conventions.md)）
-- [x] **runtime/ 五块已收进仓库**：bridge 全配置驱动、memory/mood/rhythm 原样搬、voice 只搬了脚本
-      （私人路径/角色名/QQ号/令牌已清干净，见 [runtime/README.md](runtime/README.md)）
-- [x] **`qiyu install`** 把 runtime 装进 DSH profile：默认只列清单，`--yes` 才动手；
-      目标已存在就跳过（`--force` 覆盖且先备份），`profile/package.json` 改动前必留 `.bak`
-- [x] **语音拆干净了**：`bridge/lib/voice.mjs` 管「说 + 听」，桥只管「向 NapCat 要 wav」；
-      `install` 会把转写脚本放到 `~/.dsh/qiyu/`
-- [x] **配置收敛到活动角色**：`install --character 小满` 把角色包拷到 `~/.dsh/qiyu/`，
-      桥读身份的优先级变成 **`character.json` > `qq-bridge-config.json` > 代码默认值**
-      （改人只改角色包，不碰插件配置）
+- [x] **`qiyu init` 向导**：名字 / QQ / 称呼 / 作息 / 性格 /「能不能自己改性格」；
+      每个问题都有默认值；带名字调用则全用默认值（给脚本用）
+- [x] **`qiyu deploy`**：查 Docker（没开就**静默拉起、不弹窗**）→ 选目录（挑非系统盘、查中文路径和空间）
+      → 写 OneBot/WebUI 配置 → 跑容器 → **直接打开二维码**；令牌写回 `qiyu.config.json`
+- [x] **`qiyu install`**：把 runtime 四块装进 DSH profile；**按内容判断要不要替换**，
+      换代码时保留用户自己的文件（原图之类），`package.json` 改动前必留 `.bak`
+- [x] **`qiyu preflight`**：Node / Docker / Windows / WSL / 路径 / 空间 / 网络 / 杀软 /
+      DSH / 模型凭证 / Python；`--fix` 能修引擎启动、占端口容器、edge-tts
+- [x] **`qiyu doctor`**：全链路自检 + 模板体检 + **runtime 与已装副本的代码一致性**
+- [x] **runtime 四块**：bridge / memory / mood / rhythm（去个性化，配置统一读活动角色）
+- [x] **语音拆干净**：`bridge/lib/voice.mjs` 管说和听，桥只管向 NapCat 要 wav
+- [x] 端到端：空白 profile → install → 独立实例 → 备号收发都通
 
-- [x] **端到端真跑过一次**：空白 DSH profile → `qiyu install` → 起独立实例 → 桥接上备号
-      → 发消息进群 ✅ → 群里 @ 她，话被转进会话 ✅（最后「她回话」那步因测试 profile 没配模型没验）
+已知未做：
 
-还差的：
+- [ ] **还没有陌生人在干净机器上完整装过一遍**（最该验证的一环）
+- [ ] mood 的「同一句反复记」已修（按消息签名去重），但只在千语身上验证过
+- [ ] `memory` / `mood` / `rhythm` 的其余配置项还没全部接进角色包
+- [ ] `0.0.0-stage` 这个 npm 占位版本还挂在 registry 上（不影响 `npx`）
 
-- [x] ~~`memory` / `mood` / `rhythm` 也改读活动角色~~ —— 都接上了：
-      rhythm 读 `schedule.json` 的时段、mood 读 `名字`/`称呼.主人`、memory 的名字兜底读 `名字`
-
-> 五块现在**都从活动角色读配置**了：改 `characters/<名字>/` 就能换人，不用碰插件配置。
-
-> 这一段是**从已验证能跑的实现里抽出来的**，不是照文档重写。
+> runtime 两边的代码应当一致，用 `qiyu doctor` 第 7.6 项比对；不一致就 `qiyu install --force`。
+> 配置（QQ 号、称呼、容器名、路径）**永远不同步**，那是使用者自己的东西。
 
 ---
 
