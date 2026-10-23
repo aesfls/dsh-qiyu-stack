@@ -53,10 +53,6 @@
 
 ---
 
-> ⚠️ **还没发布到 npm。** 下面命令里的 `npx dsh-qiyu-stack` 现在还跑不了。
-> 现在请先 `git clone https://github.com/aesfls/dsh-qiyu-stack.git`，
-> 进目录后用 `node bin/qiyu.mjs` 代替 `npx dsh-qiyu-stack`。发布之后这段会删掉。
-
 ## 快速开始
 
 ```bash
