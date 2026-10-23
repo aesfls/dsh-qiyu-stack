@@ -6,9 +6,19 @@
 
 **能用了，也发出去了，但还没被陌生人在干净机器上验证过。**
 
-- npm：`dsh-qiyu-stack@0.15.4`（`latest`）
-- GitHub：<https://github.com/aesfls/dsh-qiyu-stack>（公开，main，`98fbcbb`）
+- npm：`dsh-qiyu-stack@0.15.5`（`latest`）
+- GitHub：<https://github.com/aesfls/dsh-qiyu-stack>（公开，main）
 - 千语（爸爸本人的实例）：正常运行中，桥、NapCat、Docker 都通
+
+## 2026-10-23 第四轮：验收命令也补上沙箱降级（v0.15.5）
+
+第三轮只修了 `preflight`，**验收命令 `doctor` 漏了**——在 workspace-write 下它照样报
+「装了 Docker，但引擎没起来」，`有失败: true`。而 AGENTS.md 写的验收标准是「不通必须为 0」，
+陌生人跑验收会永远看到 1 个失败。0.15.5 补上：
+
+1. `doctor` 接 `沙箱受限过()`：Docker / 容器 / 端口相关的 fail 降级成 `warn`，
+   标题加「沙箱限制，这条不可信」，并附一句「去用户终端或提权再验」
+2. `qr.mjs` 的 `docker cp` 改走 `跑()`（原来直连 `execFileSync`，沙箱里会假失败「拿不到二维码」）
 
 ## 2026-10-23 第三轮：沙箱假阴性（重要）
 

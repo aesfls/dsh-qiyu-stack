@@ -9,7 +9,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { 读配置 } from './config.mjs'
-import { 跑 } from './run.mjs'
+import { 跑, 沙箱受限过 } from './run.mjs'
 
 const 包根 = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -282,6 +282,33 @@ export async function doctor({ 只输出JSON = false, 跳过WebSocket = false } 
     }
   } catch (错) {
     记('skip', '跳过模板体检', String(错.message || 错))
+  }
+
+  // ---------- 沙箱兜底：读不到子进程输出时，别把「没装/没起」当成事实 ----------
+  //
+  // 受限沙箱不允许程序开管道，所有"跑条命令看输出"的判断都可能拿到空结果。
+  // 这时把 Docker / 容器 / 端口相关的 fail 降级成 warn——否则 agent 会把
+  // 「验收标准：不通必须为 0」理解成"装失败了"，去修一台根本没坏的机器。
+  if (沙箱受限过()) {
+    let 降级了 = 0
+    for (const x of 结果) {
+      if (x.级别 !== 'fail') continue
+      if (!/Docker|引擎|容器|端口/.test(x.标题)) continue
+      x.级别 = 'warn'
+      x.标题 = '沙箱限制，这条不可信：' + x.标题
+      x.怎么修 = '在用户自己的终端里跑 qiyu doctor 再确认一次；或者把这次会话提到 danger-full-access'
+      降级了++
+    }
+    if (降级了) {
+      结果.push({
+        级别: 'warn',
+        标题: '当前沙箱读不到子进程输出',
+        依据:
+          '受限沙箱不允许程序开管道（stdio: pipe 会 EPERM）。qiyu 已改用"重定向到文件再读"兜底，' +
+          '但个别命令仍可能失败，上面 ' + 降级了 + ' 条结论已降级。',
+        怎么修: '这类结论不能当真：让用户在自己终端跑一遍，或把会话权限提到 danger-full-access',
+      })
+    }
   }
 
   // ---------- 输出 ----------

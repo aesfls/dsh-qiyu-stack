@@ -2,10 +2,11 @@
 //
 // 约定：需要用户扫码时，不能只给一个路径（用户还得自己去找文件）。
 // 一律「复制出来 + 用系统默认看图程序打开 + 在终端里说清什么时候过期」。
-import { execFileSync, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
 import { statSync } from 'node:fs'
 import { 读配置 } from './config.mjs'
+import { 跑 } from './run.mjs'
 
 export function 打开文件(路径) {
   try {
@@ -47,15 +48,11 @@ export async function qr() {
 
   const 目标 = resolve(process.cwd(), 'napcat-qrcode.png')
 
-  try {
-    execFileSync('docker', ['cp', `${配置.napcat.container}:/app/napcat/cache/qrcode.png`, 目标], {
-      encoding: 'utf8',
-      windowsHide: true,
-      timeout: 15000,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-  } catch (错) {
-    console.error('拿不到二维码：' + String((错 && (错.stderr || 错.message)) || 错).trim().slice(0, 200))
+  // 走 run.mjs：受限沙箱里 execFileSync 抓管道会 EPERM，
+  // 它会自动改成「重定向到临时文件再读」，不然会误报「拿不到二维码」。
+  const 复制 = 跑('docker', ['cp', `${配置.napcat.container}:/app/napcat/cache/qrcode.png`, 目标], 15000)
+  if (!复制.ok) {
+    console.error('拿不到二维码：' + String(复制.错 || 'docker cp 失败').trim().slice(0, 200))
     console.error('')
     console.error('可能的原因：')
     console.error('  · 容器没起 —— 跑 qiyu doctor 看看')
