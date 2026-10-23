@@ -6,9 +6,24 @@
 
 **能用了，也发出去了，但还没被陌生人在干净机器上验证过。**
 
-- npm：`dsh-qiyu-stack@0.15.5`（`latest`）
+- npm：`dsh-qiyu-stack@0.15.6`（`latest`）
 - GitHub：<https://github.com/aesfls/dsh-qiyu-stack>（公开，main）
 - 千语（爸爸本人的实例）：正常运行中，桥、NapCat、Docker 都通
+
+## 2026-10-23 第五轮：DSH 端口自动探测（v0.15.6）
+
+`qiyu.config.json` 里的 `dsh.port` 是某一次写下的快照，而 DSH 的端口会变
+（这台机器就从 64657 变到了 62853）。doctor 只信这个值，就会一直报
+「DSH 端口 64657 没人听」——不是故障，但会让人以为桥坏了。
+
+0.15.6 新增 `src/dsh-port.mjs`：
+
+1. 先试配置里的端口；不通再扫本机正在监听的端口（`netstat`）
+2. 按特征认，不猜：`/dsh-qq-bridge/state` 返回 `{"ok":true,...}` → DSH + 桥；
+   `/` 返回 401 且带 `dsh web authentication required` → DSH 在、桥没装
+3. **不写回配置**——端口下次还会变，写回去只会制造新的过期快照
+
+现在 doctor 会自动找到实际端口，输出里注明「是自动探测到的（配置里写的是 64657）」。
 
 ## 2026-10-23 第四轮：验收命令也补上沙箱降级（v0.15.5）
 

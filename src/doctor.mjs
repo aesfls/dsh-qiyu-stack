@@ -10,6 +10,7 @@ import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { 读配置 } from './config.mjs'
 import { 跑, 沙箱受限过 } from './run.mjs'
+import { 探测DSH } from './dsh-port.mjs'
 
 const 包根 = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -179,25 +180,41 @@ export async function doctor({ 只输出JSON = false, 跳过WebSocket = false } 
   }
 
   // ---------- 7. DSH 桥 ----------
-  const 桥端口 = 配置.dsh.port
-  if (!桥端口) {
-    记('skip', '跳过 DSH 桥检查（没配端口）', 'DSH 的端口每台机器都不一样，所以默认不猜', '知道的话设环境变量 QIYU_DSH_PORT，或写进 qiyu.config.json 的 dsh.port')
-  } else if (await 端口通('127.0.0.1', 桥端口)) {
+  //
+  // DSH 的端口每次启动可能变，不能只信 qiyu.config.json 里的快照。
+  // 先试配置端口，再扫本机监听端口，按特征认（见 src/dsh-port.mjs）。
+  const 探测 = await 探测DSH({ 已知端口: 配置.dsh.port })
+  if (!探测) {
+    if (配置.dsh.port) {
+      记(
+        'warn',
+        `DSH 端口 ${配置.dsh.port} 没人听，也没自动找到`,
+        'DSH 可能没开，或者端口变了',
+        '先把 DSH 开起来再跑一次；开了还找不到，设环境变量 QIYU_DSH_PORT'
+      )
+    } else {
+      记('skip', '跳过 DSH 桥检查（没找到运行中的 DSH）', 'DSH 的端口每台机器都不一样，所以默认不猜', '把 DSH 开起来再跑一次；或者设 QIYU_DSH_PORT')
+    }
+  } else if (!探测.有桥) {
+    记('warn', `DSH 在 ${探测.端口}，但没看到 dsh-qq-bridge`, '', '确认 DSH 里装了 dsh-qq-bridge 插件')
+  } else {
     try {
-      const r = await 请求(`http://127.0.0.1:${桥端口}/dsh-qq-bridge/state`)
+      const r = await 请求(`http://127.0.0.1:${探测.端口}/dsh-qq-bridge/state`)
       if (r.json && r.json.NapCat状态) {
         const 状 = r.json.NapCat状态
-        if (状.用户) 记('ok', `DSH 桥认到：${状.昵称}（${状.用户}）`)
+        const 注 = 探测.来源 === '自动探测' ? `DSH 端口 ${探测.端口} 是自动探测到的（配置里写的是 ${配置.dsh.port || '空'}）` : ''
+        if (状.用户) 记('ok', `DSH 桥认到：${状.昵称}（${状.用户}）`, 注)
         else 记('warn', 'DSH 桥连不上 NapCat', JSON.stringify(状).slice(0, 160), '桥的 NapCat 地址/令牌和 qiyu.config.json 要一致')
       } else {
-        记('warn', `DSH 在 ${桥端口}，但没看到 dsh-qq-bridge`, '', '确认 DSH 里装了 dsh-qq-bridge 插件')
+        记('warn', `DSH 在 ${探测.端口}，但没看到 dsh-qq-bridge`, '', '确认 DSH 里装了 dsh-qq-bridge 插件')
       }
     } catch (错) {
       记('warn', 'DSH 桥查不到', String(错.message || 错), '')
     }
-  } else {
-    记('warn', `DSH 端口 ${桥端口} 没人听`, '', 'DSH 没开？或者端口不是这个：设 QIYU_DSH_PORT')
   }
+
+  // 给 JSON 输出用：探测到的端口优先，没探测到就退回配置里的值
+  const 桥端口 = 探测 ? 探测.端口 : Number(配置.dsh.port) || 0
 
   // ---------- 7.5 部署路径体检 ----------
   if (配置.napcat && 配置.napcat.dataDir) {
