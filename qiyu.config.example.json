@@ -1,0 +1,14 @@
+{
+  "napcat": {
+    "container": "napcat-qq",
+    "http": "http://127.0.0.1:3000",
+    "ws": "ws://127.0.0.1:3001/",
+    "webui": "http://127.0.0.1:6099",
+    "token": "",
+    "wsToken": ""
+  },
+  "dsh": {
+    "port": 55861
+  },
+  "character": "characters"
+}

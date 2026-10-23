@@ -1,0 +1,7 @@
+node_modules/
+characters/
+*.log
+.DS_Store
+# 本机配置：有真实容器名、端口、令牌 —— 绝不进版本库
+qiyu.config.json
+qiyu.config.local.json
