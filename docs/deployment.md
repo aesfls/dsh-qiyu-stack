@@ -68,7 +68,7 @@ NapCat 必须跑在 **Docker 里的 Linux QQ** 上。这不是偏好，是唯一
 ### 最省事：一条命令
 
 ```bash
-npx qiyu-dsh-stack deploy --qq 你的QQ号
+npx dsh-qiyu-stack deploy --qq 你的QQ号
 ```
 
 它会依次做：查 Docker → 查 3000/3001/6099 有没有被占 → 建 `./napcat/{config,qq,plugins}`

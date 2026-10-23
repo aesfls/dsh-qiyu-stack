@@ -1,4 +1,4 @@
-# 栖语栈 · qiyu-dsh-stack
+# 栖语栈 · dsh-qiyu-stack
 
 让一个智能体**住进 QQ**：能听会说、记得住人、有自己的作息，还不会在群里刷屏。
 
@@ -57,25 +57,25 @@
 
 ```bash
 # 0. 先看这台机器行不行（Node / Windows / WSL / 路径 / 空间 / 网络 / 杀软 / DSH / 模型 / Python）
-npx qiyu-dsh-stack preflight
+npx dsh-qiyu-stack preflight
 
 # 1. 建一个角色 —— 会问你几个问题（名字 / QQ / 称呼 / 作息 / 性格 / 能不能自己改性格）
-npx qiyu-dsh-stack init
+npx dsh-qiyu-stack init
 
-#    不想被问就带名字，全用默认值：npx qiyu-dsh-stack init 小满
+#    不想被问就带名字，全用默认值：npx dsh-qiyu-stack init 小满
 
 # 2. 填她自己的东西
 #    characters/小满/AGENTS.md      「性格」那几行
 #    characters/小满/character.json  QQ 号 / 称呼 / 语音 / 路径（模板里全是空的）
 
 # 3. 起 NapCat —— 一条命令：建目录、写 OneBot 配置、跑容器、出码
-npx qiyu-dsh-stack deploy --qq 你的QQ号
+npx dsh-qiyu-stack deploy --qq 你的QQ号
 
 # 4. 把运行时（QQ 桥/记忆/心情/作息）装进 DSH，并让她成为「活动角色」
-npx qiyu-dsh-stack install --character 小满 --yes      # 装完重启 DSH（关掉窗口再开，不用重启电脑）
+npx dsh-qiyu-stack install --character 小满 --yes      # 装完重启 DSH（关掉窗口再开，不用重启电脑）
 
 # 5. 扫码（图会自动打开），然后自查
-npx qiyu-dsh-stack doctor
+npx dsh-qiyu-stack doctor
 ```
 
 > **用 npx 也没关系。** `install` 会先把运行时装一份到 `~/.dsh/qiyu/runtime/`，
@@ -90,7 +90,7 @@ npx qiyu-dsh-stack doctor
 ## 目录结构
 
 ```
-qiyu-dsh-stack/              引擎（角色无关，可升级）
+dsh-qiyu-stack/              引擎（角色无关，可升级）
 ├── bin/qiyu.mjs             命令行入口
 ├── src/
 │   ├── config.mjs           配置（文件 + 环境变量）
