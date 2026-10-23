@@ -200,11 +200,36 @@ export async function doctor({ 只输出JSON = false, 跳过WebSocket = false } 
   } else {
     try {
       const r = await 请求(`http://127.0.0.1:${探测.端口}/dsh-qq-bridge/state`)
-      if (r.json && r.json.NapCat状态) {
-        const 状 = r.json.NapCat状态
+      const j = r.json
+      if (j && j.配置) {
+        const 状 = j.NapCat状态
         const 注 = 探测.来源 === '自动探测' ? `DSH 端口 ${探测.端口} 是自动探测到的（配置里写的是 ${配置.dsh.port || '空'}）` : ''
-        if (状.用户) 记('ok', `DSH 桥认到：${状.昵称}（${状.用户}）`, 注)
-        else 记('warn', 'DSH 桥连不上 NapCat', JSON.stringify(状).slice(0, 160), '桥的 NapCat 地址/令牌和 qiyu.config.json 要一致')
+        if (状 && 状.用户) 记('ok', `DSH 桥认到：${状.昵称}（${状.用户}）`, 注)
+        else if (状) 记('warn', 'DSH 桥连不上 NapCat', JSON.stringify(状).slice(0, 160), '桥的 NapCat 地址/令牌和 qiyu.config.json 要一致')
+        else 记('warn', 'DSH 桥没有 NapCat 状态', '', '桥的 NapCat 地址/令牌和 qiyu.config.json 要一致')
+
+        // ⭐ 桥连上 NapCat ≠ 能把消息送进会话。
+        //    目标会话为空时，桥收到 QQ 消息只会记一句「还没填目标会话，这轮不转」，直接丢掉。
+        if (!j.配置.目标会话) {
+          记(
+            'fail',
+            '桥还没选「目标会话」',
+            '收到 QQ 消息也不知道该送进哪个会话，会直接丢掉',
+            '设置 → 通到 QQ → 目标会话：选她的会话（工作目录是 characters/<名字> 的那个）'
+          )
+        } else if (!Array.isArray(j.目标情况) || !j.目标情况.length) {
+          记(
+            'warn',
+            '「目标会话」现在没开着',
+            '可能归档了，或者 DSH 刚重启还没恢复',
+            '在 DSH 里打开那个会话；归档了就取消归档，或重新选一个'
+          )
+        } else {
+          记('ok', `目标会话：${j.目标情况[0].标题 || j.配置.目标会话}`)
+        }
+
+        if (j.配置.总开关 !== true) 记('warn', '总开关关着：她收不到也发不出', '消息进不了、也出不去', '设置 → 通到 QQ → 打开「总开关」')
+        if (j.配置.试运行 === true) 记('warn', '试运行开着：不会真的发到 QQ', '', '确认没问题后，在设置里把「试运行」关掉')
       } else {
         记('warn', `DSH 在 ${探测.端口}，但没看到 dsh-qq-bridge`, '', '确认 DSH 里装了 dsh-qq-bridge 插件')
       }

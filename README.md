@@ -76,6 +76,15 @@ npx dsh-qiyu-stack install --character 小满 --yes      # 装完重启 DSH（�
 
 # 5. 扫码（图会自动打开），然后自查
 npx dsh-qiyu-stack doctor
+
+# 6. 给她一个会话 —— 这一步命令装不出来，得人在界面里做：
+#    · 新建会话，工作目录选 install 打印的那个绝对路径（部署文件夹里的 characters/小满）
+#      她的 AGENTS.md 在这一层，DSH 才会每轮读到；别选 DSH 默认工作区，也别选 ~/.dsh/qiyu
+#    · 设置 → 通到 QQ → 「目标会话」选这个会话，再打开「总开关」
+#    · 再跑一次 npx dsh-qiyu-stack doctor：目标会话应该是 ok
+
+# 7. 写交接文档 —— 以后升级 / 换会话 / 回退都从这份开始
+npx dsh-qiyu-stack handover
 ```
 
 > **用 npx 也没关系。** `install` 会先把运行时装一份到 `~/.dsh/qiyu/runtime/`，
@@ -83,7 +92,7 @@ npx dsh-qiyu-stack doctor
 > npx 的临时缓存被清掉、或者你把 qiyu 删了，DSH 那边照样能跑。
 
 `doctor` 会逐项告诉你：Docker 在不在、容器起没起、三个端口通不通、OneBot 认不认得出人、
-事件流连不连得上、DSH 桥接没接上。**每条失败都带一句怎么修。**
+事件流连不连得上、DSH 桥接没接上、**桥有没有选「目标会话」、总开关开没开**。每条失败都带一句怎么修。
 
 ---
 

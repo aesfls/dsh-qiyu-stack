@@ -14,6 +14,7 @@ import { qr } from '../src/qr.mjs'
 import { deploy } from '../src/deploy.mjs'
 import { install } from '../src/install.mjs'
 import { preflight } from '../src/preflight.mjs'
+import { handover } from '../src/handover.mjs'
 import { 读配置, 配置文件路径 } from '../src/config.mjs'
 
 const 参数 = process.argv.slice(2)
@@ -72,6 +73,11 @@ const 帮助 = `
        --force                  已存在也覆盖（覆盖前自动备份）
 
   qiyu config                   显示配置来源（文件 / 环境变量 / 默认值）
+
+  qiyu handover                 在部署文件夹写「交接.md」：位置 / QQ / 桥的目标会话 /
+                                升级命令 / 回退方法 / 给新会话的开场白
+       --character <名字>       不指定时自动认（配置里记的，或 characters/ 下唯一的那个）
+       --out <文件名>           默认 交接.md
 
 配置文件：qiyu.config.json（当前目录），也可以用环境变量覆盖：
   QIYU_ONEBOT_TOKEN   OneBot HTTP 令牌
@@ -151,6 +157,10 @@ async function 主() {
     console.log('配置文件：' + 配置文件路径())
     console.log(JSON.stringify(配置, null, 2))
     return 0
+  }
+
+  if (命令 === 'handover' || 命令 === '交接') {
+    return await handover({ 角色: 取值('--character'), 输出: 取值('--out', '交接.md') })
   }
 
   console.error('不认识的命令：' + 命令)
