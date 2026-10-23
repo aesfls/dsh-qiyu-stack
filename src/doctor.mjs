@@ -9,6 +9,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { 读配置 } from './config.mjs'
+import { 跑 } from './run.mjs'
 
 const 包根 = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -16,15 +17,6 @@ const 绿 = (s) => `\x1b[32m${s}\x1b[0m`
 const 黄 = (s) => `\x1b[33m${s}\x1b[0m`
 const 红 = (s) => `\x1b[31m${s}\x1b[0m`
 const 灰 = (s) => `\x1b[90m${s}\x1b[0m`
-
-function 跑(命令, 参数, 超时 = 8000) {
-  try {
-    const 出 = execFileSync(命令, 参数, { timeout: 超时, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
-    return { ok: true, 出: String(出).trim() }
-  } catch (错) {
-    return { ok: false, 错: String((错 && (错.stderr || 错.message)) || 错).trim() }
-  }
-}
 
 function 端口通(主机, 端口, 超时 = 1500) {
   return new Promise((解决) => {

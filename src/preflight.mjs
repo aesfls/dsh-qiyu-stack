@@ -11,20 +11,12 @@ import { existsSync, statfsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir, release } from 'node:os'
 import { createInterface } from 'node:readline'
+import { 跑, 沙箱受限过 } from './run.mjs'
 
 const 绿 = (s) => `\x1b[32m${s}\x1b[0m`
 const 黄 = (s) => `\x1b[33m${s}\x1b[0m`
 const 红 = (s) => `\x1b[31m${s}\x1b[0m`
 const 灰 = (s) => `\x1b[90m${s}\x1b[0m`
-
-function 跑(命令, 参数, 超时 = 8000) {
-  try {
-    const 出 = execFileSync(命令, 参数, { timeout: 超时, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
-    return { ok: true, 出: String(出).trim() }
-  } catch (错) {
-    return { ok: false, 错: String((错 && (错.stderr || 错.message)) || 错).trim() }
-  }
-}
 
 function 端口通(端口, 超时 = 1500) {
   return new Promise((解决) => {
@@ -355,6 +347,30 @@ export async function preflight(选项 = {}) {
       记('warn', 'Python 有，但没装 edge-tts', '', `装：${py} -m pip install edge-tts（只用"说"才需要）`)
       待修.push({ 名: '装 edge-tts', 做: () => 修Edge(py) })
     }
+  }
+
+  // ---------- 沙箱兜底：读不到命令输出时，别把「没装」当成事实 ----------
+  //
+  // 受限沙箱不允许程序开管道，所有"跑条命令看输出"的判断都可能拿到空结果。
+  // 这时把相关 fail 降级成 warn 并说清楚——否则 agent 会去让用户装一个已经装好的 Docker。
+  if (沙箱受限过()) {
+    let 降级了 = 0
+    for (const x of 结果) {
+      if (x.级别 !== 'fail') continue
+      if (!/Docker|容器|端口|Python|WSL|虚拟化/.test(x.标题)) continue
+      x.级别 = 'warn'
+      x.标题 = '沙箱限制，这条不可信：' + x.标题
+      x.怎么修 = '在用户自己的终端里跑 qiyu preflight 再确认一次；或者把这次会话提到 danger-full-access'
+      降级了++
+    }
+    结果.push({
+      级别: 'warn',
+      标题: '当前沙箱读不到子进程输出',
+      依据:
+        '受限沙箱不允许程序开管道（stdio: pipe 会 EPERM）。qiyu 已改用"重定向到文件再读"兜底，' +
+        '但个别命令仍可能失败，' + (降级了 ? `上面 ${降级了} 条结论已降级` : '') + '。',
+      怎么修: '这类结论不能当真：让用户在自己终端跑一遍，或把会话权限提到 danger-full-access',
+    })
   }
 
   // ---------- 输出 ----------

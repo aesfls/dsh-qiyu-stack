@@ -8,18 +8,12 @@
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { 跑 } from './run.mjs'
 
 const 绿 = (s) => `\x1b[32m${s}\x1b[0m`
 const 黄 = (s) => `\x1b[33m${s}\x1b[0m`
 const 灰 = (s) => `\x1b[90m${s}\x1b[0m`
 
-export function 跑(命令, 参数, 超时 = 15000) {
-  return new Promise((解决) => {
-    execFile(命令, 参数, { timeout: 超时, windowsHide: true, encoding: 'utf8' }, (错, 出, 错出) => {
-      解决({ ok: !错, 出: String(出 || '').trim(), 错: String(错出 || (错 && 错.message) || '').trim() })
-    })
-  })
-}
 
 export async function 引擎版本() {
   const r = await 跑('docker', ['version', '--format', '{{.Server.Version}}'], 10000)
