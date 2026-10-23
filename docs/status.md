@@ -10,6 +10,14 @@
 - GitHub：<https://github.com/aesfls/dsh-qiyu-stack>（公开，main）
 - 千语（爸爸本人的实例）：正常运行中，桥、NapCat、Docker 都通
 
+## 发版规矩（以后照做）
+
+每次版本更新：先在 `CHANGELOG.md` 写一段「这版做了什么」，再发 npm。
+
+- `qiyu install` 会把当前版本这段写进 `~/.dsh/qiyu/version.json`
+- 设置里「栖语 → 版本」页签显示版本、安装时间、这次更新内容、各运行时版本
+- `qiyu handover` 也会把它写进 `交接.md`
+
 ## 2026-10-23 第六轮：把「第六步」补上（v0.15.7）
 
 陌生人在默认会话里部署会发现：五条命令全绿，桥却其实是哑的。原因有四层：
@@ -29,6 +37,9 @@
    明确说会话工作目录要选部署文件夹里的 `characters/<名字>`（不是 `~/.dsh/qiyu`）
 5. 新增 `qiyu handover`：在部署文件夹写 `交接.md`——位置 / QQ / 桥的目标会话 /
    升级命令 / 回退方法 / 直接丢给新会话的开场白，方便归档和 GitHub 升级后接手
+6. 设置面板新增「版本」页签：显示栈版本 / 安装时间 / 各运行时版本；
+   `install` 会把这份信息写进 `~/.dsh/qiyu/version.json`，面板通过
+   `/dsh-qiyu-panel/version` 读（没有记录就现场读各插件 package.json）
 
 ## 2026-10-23 第五轮：DSH 端口自动探测（v0.15.6）
 

@@ -8,6 +8,7 @@ import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { 读配置, 配置文件路径 } from './config.mjs'
 import { 探测DSH } from './dsh-port.mjs'
+import { 读更新内容 } from './changelog.mjs'
 
 const 包根 = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -142,6 +143,10 @@ export async function handover({ 角色: 指定角色 = '', 输出 = '交接.md'
 
 重建步骤：DSH 新建会话 → 工作目录选上面那个路径 → 设置 → 通到 QQ →
 「目标会话」选这个会话 → 打开「总开关」。
+
+## 这次版本更新了什么（${版本()}）
+
+${读更新内容(版本()) || '（这次没写更新记录）'}
 
 ## 以后升级到新版本（GitHub / npm）
 

@@ -1,0 +1,7 @@
+# 「栖语」设置总面板
+#
+# 这一行激活宿主半边（空的）+ 这个包在 package.json 里声明的 dsh.client 网页半边。
+# id 是加载器里的行名，两处要一致。
+- insert:
+    - id: qiyu-panel
+      name: 'dsh-qiyu-panel'

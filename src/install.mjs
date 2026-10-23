@@ -11,6 +11,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync, mkdirSync, cpSync, copyFileSync, rmSync, renameSync } from 'node:fs'
 import { 读配置 } from './config.mjs'
+import { 读更新内容 } from './changelog.mjs'
 import { join, resolve, dirname } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -25,7 +26,7 @@ const 红 = (s) => `\x1b[31m${s}\x1b[0m`
 const 灰 = (s) => `\x1b[90m${s}\x1b[0m`
 
 // runtime 下这几个目录就是要装的块（voice 目前只是脚本，不当插件装）
-const 模块目录 = ['bridge', 'memory', 'mood', 'rhythm']
+const 模块目录 = ['bridge', 'memory', 'mood', 'rhythm', 'panel']
 
 /**
  * 一个目录的"指纹"：相对路径 → 内容哈希。
@@ -283,6 +284,27 @@ export async function install(选项 = {}) {
   // ---------- 4.5 语音转写脚本 + 活动角色，落到 $DSH_HOME/qiyu ----------
   const 家 = process.env.DSH_HOME || join(homedir(), '.dsh')
   const qiyu家 = join(家, 'qiyu')
+
+  // ---------- 4.4 版本记录：设置面板的「版本」页签读它 ----------
+  try {
+    const 栈版本 = JSON.parse(readFileSync(join(包根, 'package.json'), 'utf8')).version || '?'
+    const 模块版本 = {}
+    for (const m of 模块们) 模块版本[m.名字] = m.版本
+    mkdirSync(qiyu家, { recursive: true })
+    writeFileSync(
+      join(qiyu家, 'version.json'),
+      JSON.stringify(
+        { 版本: 栈版本, 安装时间: new Date().toISOString(), 更新内容: 读更新内容(栈版本), 模块: 模块版本 },
+        null,
+        2,
+      ) + '\n',
+      'utf8',
+    )
+    console.log(绿('✓') + ` 版本记录 → ${join(qiyu家, 'version.json')}`)
+  } catch (错) {
+    console.log(黄('· 版本记录没写成（不影响使用）：') + String(错.message || 错))
+  }
+
   try {
     const 源 = join(包根, 'runtime', 'voice', '语音转写.py')
     if (existsSync(源)) {

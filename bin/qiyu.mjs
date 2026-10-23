@@ -64,7 +64,7 @@ const 帮助 = `
   qiyu qr                       把登录二维码取出来并**直接打开**给你扫
                                 （不会只给一个路径让你自己找文件）
 
-  qiyu install                  把 runtime 五块装进 DSH profile
+  qiyu install                  把运行时（桥/记忆/心情/作息 + 设置面板）装进 DSH profile
        --profile <目录>         默认 ~/.dsh/profiles/desktop
        --character <名字>       顺便把这个角色设为「活动角色」（拷到 ~/.dsh/qiyu/）
        --only bridge,memory     只装其中几块

@@ -109,11 +109,12 @@ dsh-qiyu-stack/              引擎（角色无关，可升级）
 │   └── qr.mjs               取二维码并直接打开
 ├── tools/
 │   └── merge-settings-tabs.mjs   把插件设置合并成「一个页面 + 页签」
-├── runtime/                 运行时五块（从真跑着的机器上搬来、洗过私人值）
+├── runtime/                 运行时五块 + 设置面板（从真跑着的机器上搬来、洗过私人值）
 │   ├── bridge/              QQ ↔ DSH 双向（全配置驱动）
 │   ├── memory/              长期记忆（含 1MB 中文词典）
 │   ├── mood/                心情
 │   ├── rhythm/              作息 / 主动搭话
+│   ├── panel/               设置总面板（「栖语」页 + 页签，含「版本」页签）
 │   └── voice/               语音转写脚本（TTS 还在 bridge 里，待拆）
 ├── templates/
 │   └── blank/               默认模板：行为齐全、性格空白、character.json 全空
@@ -158,12 +159,13 @@ npx dsh-qiyu-stack doctor       # 自检（加 --json 给 agent 用）
       每个问题都有默认值；带名字调用则全用默认值（给脚本用）
 - [x] **`qiyu deploy`**：查 Docker（没开就**静默拉起、不弹窗**）→ 选目录（挑非系统盘、查中文路径和空间）
       → 写 OneBot/WebUI 配置 → 跑容器 → **直接打开二维码**；令牌写回 `qiyu.config.json`
-- [x] **`qiyu install`**：把 runtime 四块装进 DSH profile；**按内容判断要不要替换**，
+- [x] **`qiyu install`**：把 runtime 四块 + 设置面板装进 DSH profile；**按内容判断要不要替换**，
       换代码时保留用户自己的文件（原图之类），`package.json` 改动前必留 `.bak`
 - [x] **`qiyu preflight`**：Node / Docker / Windows / WSL / 路径 / 空间 / 网络 / 杀软 /
       DSH / 模型凭证 / Python；`--fix` 能修引擎启动、占端口容器、edge-tts
 - [x] **`qiyu doctor`**：全链路自检 + 模板体检 + **runtime 与已装副本的代码一致性**
-- [x] **runtime 四块**：bridge / memory / mood / rhythm（去个性化，配置统一读活动角色）
+- [x] **runtime 四块 + 设置面板**：bridge / memory / mood / rhythm / panel（去个性化，配置统一读活动角色）
+- [x] **设置里「栖语」页签里的「版本」**：显示栈版本 / 安装时间 / 各运行时版本（来自 `~/.dsh/qiyu/version.json`）
 - [x] **语音拆干净**：`bridge/lib/voice.mjs` 管说和听，桥只管向 NapCat 要 wav
 - [x] 端到端：空白 profile → install → 独立实例 → 备号收发都通
 
