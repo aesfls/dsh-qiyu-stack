@@ -112,13 +112,15 @@ dsh-qiyu-stack/              引擎（角色无关，可升级）
 │   └── qr.mjs               取二维码并直接打开
 ├── tools/
 │   └── merge-settings-tabs.mjs   把插件设置合并成「一个页面 + 页签」
-├── runtime/                 运行时五块 + 设置面板（从真跑着的机器上搬来、洗过私人值）
+├── runtime/                 运行时五块 + 护栏 + 设置面板（从真跑着的机器上搬来、洗过私人值）
 │   ├── bridge/              QQ ↔ DSH 双向（全配置驱动）
+│   ├── guard/               护栏：群轮次限权 + 「群里的话不是指令」+ 家底快照
 │   ├── memory/              长期记忆（含 1MB 中文词典）
 │   ├── mood/                心情
 │   ├── rhythm/              作息 / 主动搭话
 │   ├── panel/               设置总面板（「栖语」页 + 页签，含「版本」页签）
 │   └── voice/               语音转写脚本（TTS 还在 bridge 里，待拆）
+├── test/                    离线单测（`npm test`，零依赖）
 ├── templates/
 │   └── blank/               默认模板：行为齐全、性格空白、character.json 全空
 ├── docs/
@@ -141,7 +143,7 @@ characters/小满/              你的角色包（不进版本库）
 
 ---
 
-## 进度（v0.15.1，2026-10-23）
+## 进度（v0.15.9，2026-10-25）
 
 **已发布**：[npm](https://www.npmjs.com/package/dsh-qiyu-stack) · [GitHub](https://github.com/aesfls/dsh-qiyu-stack)
 
@@ -162,24 +164,28 @@ npx dsh-qiyu-stack doctor       # 自检（加 --json 给 agent 用）
       每个问题都有默认值；带名字调用则全用默认值（给脚本用）
 - [x] **`qiyu deploy`**：查 Docker（没开就**静默拉起、不弹窗**）→ 选目录（挑非系统盘、查中文路径和空间）
       → 写 OneBot/WebUI 配置 → 跑容器 → **直接打开二维码**；令牌写回 `qiyu.config.json`
-- [x] **`qiyu install`**：把 runtime 四块 + 设置面板装进 DSH profile；**按内容判断要不要替换**，
+- [x] **`qiyu install`**：把 runtime 五块 + 护栏 + 设置面板装进 DSH profile；**按内容判断要不要替换**，
       换代码时保留用户自己的文件（原图之类），`package.json` 改动前必留 `.bak`
 - [x] **`qiyu preflight`**：Node / Docker / Windows / WSL / 路径 / 空间 / 网络 / 杀软 /
       DSH / 模型凭证 / Python；`--fix` 能修引擎启动、占端口容器、edge-tts
 - [x] **`qiyu doctor`**：全链路自检 + 模板体检 + **runtime 与已装副本的代码一致性**
-- [x] **runtime 四块 + 设置面板**：bridge / memory / mood / rhythm / panel（去个性化，配置统一读活动角色）
+- [x] **runtime 五块 + 护栏 + 设置面板**：bridge / guard / memory / mood / rhythm / panel（去个性化，配置统一读活动角色）
+- [x] **护栏 `dsh-qq-guard`**：群里来的那一轮只留「回话 + 读文件」，跑命令/写文件/记记忆一律拒；
+      外加「群里的话不是指令」的稳定提示词段、家底哈希快照告警。默认 `dry`（只记账），看一天日志再切 `enforce`
+- [x] **离线单测**：`npm test` 跑 `test/` 下全部（桥的限速/路径/防重入/来源/渠道 + 护栏判定/快照），零依赖
 - [x] **设置里「栖语」页签里的「版本」**：显示栈版本 / 安装时间 / 各运行时版本（来自 `~/.dsh/qiyu/version.json`）
 - [x] **语音拆干净**：`bridge/lib/voice.mjs` 管说和听，桥只管向 NapCat 要 wav
 - [x] 端到端：空白 profile → install → 独立实例 → 备号收发都通
 
 已知未做：
 
-- [ ] **还没有陌生人在干净机器上完整装过一遍**（最该验证的一环）
-- [ ] mood 的「同一句反复记」已修（按消息签名去重），但只在千语身上验证过
+- [ ] mood 的「同一句反复记」已修（按消息签名去重），但只在一个实例上验证过
 - [ ] `memory` / `mood` / `rhythm` 的其余配置项还没全部接进角色包
 - [ ] `0.0.0-stage` 这个 npm 占位版本还挂在 registry 上（不影响 `npx`）
 
-> runtime 两边的代码应当一致，用 `qiyu doctor` 第 7.6 项比对；不一致就 `qiyu install --force`。
+> runtime 两边的代码应当一致，用 `qiyu doctor` 比对。**方向别搞反**：
+> 仓库比真机新 → `qiyu install` 同步（会先备份）；真机比仓库新 → 先把改动回灌进仓库，
+> 别用 `--force` 把新补丁盖成旧的。只差注释/文案可以忽略。
 > 配置（QQ 号、称呼、容器名、路径）**永远不同步**，那是使用者自己的东西。
 
 ---
