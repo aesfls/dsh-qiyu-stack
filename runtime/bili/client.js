@@ -198,8 +198,8 @@ window.__ModuleLoader__.load({
         if (cfg && mention === null) setMention(cfg.mentionName || '')
         if (cfg && dmUid === null) setDmUid(cfg.dmUid ? String(cfg.dmUid) : '')
         if (cfg && dmMode === null) setDmMode(cfg.dmMode || 'off')
-        if (cfg && subProvider === null) setSubProvider(cfg.subProvider || 'apii')
-        if (cfg && subModel === null) setSubModel(cfg.subModel || 'deepseek-v4-pro')
+        if (cfg && subProvider === null) setSubProvider(cfg.subProvider || '')
+        if (cfg && subModel === null) setSubModel(cfg.subModel || '')
         if (cfg && ownerName === null) setOwnerName(cfg.ownerName || '')
         if (cfg && inboxUids === null) setInboxUids(String(cfg.inboxUids || ''))
         if (cfg && inboxMaxRemind === null) setInboxMaxRemind(String(cfg.inboxMaxRemind ?? 2))
@@ -822,11 +822,11 @@ window.__ModuleLoader__.load({
         document.head.appendChild(style)
         ctx.effect(() => () => style.remove(), 'dsh-bili-scroll: 设置页样式')
 
-        // ⭐ 进「设置」：label 就是左侧导航里那一项（抄 dsh-meme 的写法）
+        // ⭐ 进「栖语」页：总面板只收 qiyu.tab，注册成 settings.section 会跑到左侧独立一项（实测踩过）
         const slots = (typeof ctx.get === 'function' ? ctx.get('slots') : undefined) || ctx.slots
         if (!slots) return
-        slots.inject('settings.section', () => slots.register(
-          { name: 'settings.section', id: 'bili-scroll', order: 30, label: '刷B站' },
+        slots.inject('qiyu.tab', () => slots.register(
+          { name: 'qiyu.tab', id: 'bili-scroll', order: 30, label: '刷B站' },
           () => h(Panel),
         ))
       },

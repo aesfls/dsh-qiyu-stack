@@ -1,6 +1,6 @@
 {
   "name": "dsh-qiyu-stack",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "description": "栖语栈：让一个智能体住进 QQ —— QQ 双向桥、长期记忆、心情、语音、作息，以及把 NapCat 部署这件事一次做对",
   "type": "module",
   "bin": {

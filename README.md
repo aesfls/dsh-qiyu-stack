@@ -95,7 +95,7 @@ npx dsh-qiyu-stack handover
 事件流连不连得上、DSH 桥接没接上、**桥有没有选「目标会话」、总开关开没开、好友备注认不认得出**。
 每条失败都带一句怎么修。
 
-> **刷 B 站不在本栈范围**：那需要另装 `dsh-bili-scroll`；这里的 mood 只提供「到点提醒」的钩子。
+> **刷 B 站已在本栈里**：`runtime/bili`（`dsh-bili-subagent`）随安装就装好；mood 另外提供「到点提醒」的钩子。
 
 ---
 

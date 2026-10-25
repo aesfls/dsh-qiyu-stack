@@ -158,7 +158,10 @@ function 归一化(原始) {
     转私聊: 布(混.转私聊, 默认配置.转私聊),
     转群: 布(混.转群, 默认配置.转群),
     自己QQ: Number(混.自己QQ) || 0,
-    主人: 字(混.主人),
+    // ⭐ 2026-10-25：配置里没填「主人」时，用角色包的 `称呼.主人` 兜底。
+    //   起因：init 只写 character.json（称呼.主人），桥却只读 qq-bridge-config.json →
+    //   doctor 报「还没设她该怎么称呼你」，身份表也生不出来，谁都不认（实测踩过）。
+    主人: 字(混.主人) || 字((角色.称呼 || {}).主人),
     身份表: Array.isArray(混.身份表) ? 混.身份表.filter((x) => x && x.备注前缀) : [],
     DockerDesktop: 字(混.DockerDesktop),
     NapCat: 字(混.NapCat) || 默认配置.NapCat,
@@ -526,11 +529,14 @@ export function apply(ctx) {
     return 群表
   }
 
-  // ⭐ 没聊过的人：NapCat 查历史会报「消息不存在」，别每 4 秒去撞一次
+  // ⭐ 没聊过的人：NapCat 查历史会报「消息不存在」，别每 4 秒去撞一次。
+  //   ⚠ 2026-10-25 修：原来缓存 10 分钟 —— 部署完对方第一次发消息，如果那一刻刚好
+  //   查过一次空历史，这条消息会在 NapCat 历史里躺着、却被跳过 10 分钟（实测：14:33 拖到 14:43）。
+  //   改成 60 秒，并且**一有出站消息就清掉缓存**（见 发一个）。
   const 空历史 = new Map() // uid → 上次确认“查不到”的时间
   const 空历史跳过 = (uid) => {
     const t = 空历史.get(uid) || 0
-    return Date.now() - t < 10 * 60 * 1000
+    return Date.now() - t < 60 * 1000
   }
 
   // ⭐ 主动发消息的额度：落盘、按自然日算（重启不清零）
@@ -606,6 +612,9 @@ export function apply(ctx) {
       const 成 = !!(j && j.status === 'ok' && j.retcode === 0)
       // 只有真的发出去了才记账；失败的不占额度（不然被限流时会更难恢复）
       if (成 && 排队动作.has(action)) 记一笔(限速状态, 排队键(action), Date.now())
+      // ⭐ 2026-10-25：私聊发出去了，说明这条路通了 —— 顺手清掉「空历史」缓存，
+      //   否则对方马上回一句，最多要等 60 秒才被读到。
+      if (成 && action === 'send_private_msg' && 体 && 体.user_id) 空历史.delete(Number(体.user_id))
       return { action, ok: 成, 数据: j }
     } catch (error) {
       return { action, ok: false, 数据: { 错: String((error && error.message) || error) } }
@@ -1440,6 +1449,12 @@ export function apply(ctx) {
     const 本轮开始 = Date.now()
     let 本轮条数 = 0
     const 配置 = 读配置()
+
+    // ⭐ 2026-10-25：好友表**先刷**，跟「总开关 / 目标会话」没关系。
+    //   以前放在早退之后 —— 没选目标会话时永远刷不到，doctor 就报
+    //   「身份表在，但一个好友都认不出」（假阴性，实测踩过）。
+    const 表 = await 刷新好友表(配置)
+
     // 总开关关 / 没选会话：只把「上次时间」推到此刻，别开的时候就补一大串旧的
     if (!配置.总开关 || !配置.目标会话) {
       上次私聊时间 = Math.floor(Date.now() / 1000)
@@ -1448,7 +1463,6 @@ export function apply(ctx) {
       return
     }
     // ⭐ 身份表：只认她好友列表里的备注。没备注的人（哪怕昵称叫「爸爸」）根本不进表
-    const 表 = await 刷新好友表(配置)
 
     // ⭐ 2026-10-25 p32：NapCat 还没上线就不要往下轮询了 —— 否则每 4 秒
     //   「拉群列表失败」「查 get_group_msg_history 超时」刷一屏，掩盖真正的问题。
@@ -1738,8 +1752,8 @@ export function apply(ctx) {
         if (空历史跳过(uid)) continue
         const 列表 = await 拉('get_friend_msg_history', { user_id: uid, count: 10 })
         if (!列表.length) {
-          // 没聊过 / 查不到：十钟内不再撞（NapCat 每次都会写一条 error 日志）
-          if (!空历史.has(uid)) 记账('和「' + 标签 + '」还没有聊天记录，先不轮询（10 分钟后再试）')
+          // 没聊过 / 查不到：一分钟内不再撞（NapCat 每次都会写一条 error 日志）
+          if (!空历史.has(uid)) 记账('和「' + 标签 + '」还没有聊天记录，先不轮询（1 分钟后再试）')
           空历史.set(uid, Date.now())
           continue
         }

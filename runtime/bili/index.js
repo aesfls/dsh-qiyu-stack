@@ -95,10 +95,10 @@ export const Config = !z ? undefined : z.object({
   pythonPath: z.string().default('python').extra('volatile', true),
   /** 日报形态：full=完整（现状）· brief=每条一两行 · off=不写报告（只发评论） */
   reportLevel: z.string().default('full').extra('volatile', true),
-  /** ⭐ 派子代理刷 B 站用的 provider（默认用主人自己 API 里的，避用官方 key） */
-  subProvider: z.string().default('apii').extra('volatile', true),
-  /** ⭐ 派子代理刷 B 站用的模型 */
-  subModel: z.string().default('deepseek-v4-pro').extra('volatile', true),
+  /** ⭐ 派子代理刷 B 站用的 provider（留空 = 用 DSH 当前默认；填了才指定，别写死某个环境里才有的名字） */
+  subProvider: z.string().default('').extra('volatile', true),
+  /** ⭐ 派子代理刷 B 站用的模型（留空 = 用 DSH 当前默认） */
+  subModel: z.string().default('').extra('volatile', true),
   /** 每次（每轮）最多挑几条（一次挑一条更清爽，默认 1） */
   perScan: z.natural().default(1).extra('volatile', true),
   /** ⭐ 自动刷在哪个会话触发（留空 = 自动挑最近聊过的那个会话） */
@@ -188,7 +188,7 @@ export function apply(ctx, config) {
     perDay: 5, gapHours: 3, peakValley: false, active: true, noon: false, night: false, autoComment: false,
     dmMode: 'off', dmUid: 0,
     keywords: [], commentPerRound: 1, mentionName: '', pythonPath: 'python', reportLevel: 'full',
-    subProvider: 'apii', subModel: 'deepseek-v4-pro',
+    subProvider: '', subModel: '',
     perScan: 1,
     targetSession: '',
     ownerName: '',
@@ -428,7 +428,11 @@ export function apply(ctx, config) {
         request: {
           prompt: [{ type: 'text', text: prompt }],
           parent,
-          agentOptions: { provider: String(cfg.subProvider || 'apii'), model: String(cfg.subModel || 'deepseek-v4-pro') },
+          // ⭐ 只在配置里明确填了才指定 provider/model；留空让 DSH 用当前默认
+          agentOptions: {
+            ...(cfg.subProvider ? { provider: String(cfg.subProvider) } : {}),
+            ...(cfg.subModel ? { model: String(cfg.subModel) } : {}),
+          },
         },
         signal: exec?.signal || new AbortController().signal,
         delivery: 'caller',

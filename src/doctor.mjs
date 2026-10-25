@@ -221,9 +221,9 @@ export async function doctor({ 只输出JSON = false, 跳过WebSocket = false } 
         } else if (!Array.isArray(j.目标情况) || !j.目标情况.length) {
           记(
             'warn',
-            '「目标会话」现在没开着',
-            '可能归档了，或者 DSH 刚重启还没恢复',
-            '在 DSH 里打开那个会话；归档了就取消归档，或重新选一个'
+            '「目标会话」配了，但现在没开着',
+            `桥报 目标情况=[]（配置里是 ${String(j.配置.目标会话).slice(0, 20)}…）：会话没打开 / 归档了 / DSH 刚重启还没恢复`,
+            '在 DSH 里打开那个会话（左栏点一下）；归档了就取消归档。打开后重跑一次 doctor，这条应当变 ok'
           )
         } else {
           记('ok', `目标会话：${j.目标情况[0].标题 || j.配置.目标会话}`)
@@ -243,6 +243,36 @@ export async function doctor({ 只输出JSON = false, 跳过WebSocket = false } 
               记('warn', '护栏在干跑（dry）：只记账，不拦', '群里的话现在拦不住，只会写进 ~/.dsh/qq-guard.log', '先看一天日志、确认「本该拒绝」的清单对；没问题就把「模式」改成 enforce（热生效）')
             } else {
               记('ok', '护栏：群轮次真拦（enforce）')
+            }
+          }
+        } catch (error) {}
+
+        // ⭐ 2026-10-25：心情 / 作息 的「目标会话」跟桥对得上吗？
+        //   实测：桥和会话都对，心情却还挂在上一轮部署的旧会话上 —— doctor 0 fail，
+        //   但心情永远不涨。所以单独比一次（两边都认 `session-` 前缀带不带）。
+        try {
+          const 短 = (x) => String(x || '').replace(/^session-/, '')
+          const 桥目标 = 短(j.配置.目标会话)
+          const 家目录 = process.env.DSH_HOME || join(process.env.USERPROFILE || '', '.dsh')
+          const 各管 = [
+            ['心情', join(家目录, 'feiyu-mood', 'config.json')],
+            ['主动搭话', join(家目录, 'speak-up-config.json')],
+          ]
+          for (const [名, 路径] of 各管) {
+            if (!existsSync(路径)) continue
+            let c = {}
+            try {
+              c = JSON.parse(readFileSync(路径, 'utf8').replace(/^\uFEFF/, '')) || {}
+            } catch (error) {
+              continue
+            }
+            const 它 = 短(c.targetSession || c.目标会话)
+            if (!它) {
+              记('warn', `${名}没选「目标会话」`, `${路径} 里 targetSession 是空的，它不会挂到任何会话`, `在设置里给「${名}」选一个会话（选跟桥同一个）`)
+            } else if (桥目标 && 它 !== 桥目标) {
+              记('warn', `${名}挂到了别的会话`, `它指向 ${它.slice(0, 12)}…，桥的「目标会话」是 ${桥目标.slice(0, 12)}…（常见于重装后没清旧配置）`, `把「${名}」的目标会话改成跟桥一致，或删掉 ${路径} 让它重建`)
+            } else {
+              记('ok', `${名}：跟桥同一个会话`)
             }
           }
         } catch (error) {}
