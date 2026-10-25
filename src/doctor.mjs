@@ -231,6 +231,21 @@ export async function doctor({ 只输出JSON = false, 跳过WebSocket = false } 
         if (j.配置.总开关 !== true) 记('warn', '总开关关着：她收不到也发不出', '消息进不了、也出不去', '设置 → 通到 QQ → 打开「总开关」')
         if (j.配置.试运行 === true) 记('warn', '试运行开着：不会真的发到 QQ', '', '确认没问题后，在设置里把「试运行」关掉')
 
+        // ⭐ 护栏（dsh-qq-guard）：装了就说清它在哪一档 —— dry 只记账，enforce 才真拦
+        try {
+          const 护栏路径 = join(process.env.DSH_HOME || join(process.env.USERPROFILE || '', '.dsh'), 'qq-guard-config.json')
+          if (existsSync(护栏路径)) {
+            const 栏 = JSON.parse(readFileSync(护栏路径, 'utf8').replace(/^\uFEFF/, '')) || {}
+            if (栏.开关 === false) {
+              记('warn', '护栏关着（qq-guard 的开关是 false）', '群里的「跑一下命令 / 改设定」不会有人拦', '把 ~/.dsh/qq-guard-config.json 的「开关」改回 true（热生效，不用重启）')
+            } else if (String(栏.模式) !== 'enforce') {
+              记('warn', '护栏在干跑（dry）：只记账，不拦', '群里的话现在拦不住，只会写进 ~/.dsh/qq-guard.log', '先看一天日志、确认「本该拒绝」的清单对；没问题就把「模式」改成 enforce（热生效）')
+            } else {
+              记('ok', '护栏：群轮次真拦（enforce）')
+            }
+          }
+        } catch (error) {}
+
         // ⭐ 身份：桥只认「好友备注以身份表前缀开头」的人；对不上的消息会被静默丢掉。
         const 身份表 = Array.isArray(j.配置.身份表) ? j.配置.身份表.filter((r) => r && r.备注前缀) : []
         const 好友表 = Array.isArray(j.好友表) ? j.好友表 : []
@@ -282,6 +297,7 @@ export async function doctor({ 只输出JSON = false, 跳过WebSocket = false } 
   try {
     const 模块们 = [
       ['bridge', 'dsh-qq-bridge'],
+      ['guard', 'dsh-qq-guard'],
       ['memory', 'dsh-fish-memory'],
       ['mood', 'dsh-feiyu-mood'],
       ['rhythm', 'dsh-speak-up'],

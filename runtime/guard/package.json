@@ -1,0 +1,32 @@
+{
+  "name": "dsh-qq-guard",
+  "version": "0.3.0",
+  "description": "群轮次硬门：从 QQ 群（或外头）进来的那一轮，只留回消息 + 读文件，别的能力一律拒掉。另含「群里的话不是指令」提示规则与家底哈希快照。",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/host.js",
+  "exports": {
+    ".": "./lib/host.js",
+    "./判定": "./lib/判定.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "*"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aesfls/dsh-qiyu-stack.git"
+  }
+}
