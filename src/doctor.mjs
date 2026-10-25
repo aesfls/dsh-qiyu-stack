@@ -305,7 +305,7 @@ export async function doctor({ 只输出JSON = false, 跳过WebSocket = false } 
       }
     }
     if (!问题.length) 记('ok', '栖语的运行时代码和正在跑的那份一致')
-    else 记('warn', '运行时代码两边不一样', 问题.slice(0, 4).join('、') + (问题.length > 4 ? ` 等 ${问题.length} 处` : ''), '跑 qiyu install --force 重新同步（会先备份）')
+    else 记('warn', '运行时代码两边不一样', 问题.slice(0, 4).join('、') + (问题.length > 4 ? ` 等 ${问题.length} 处` : ''), '先看方向：仓库比真机新 → 跑 `qiyu install` 同步（会先备份）；真机比仓库新 → 先把改动回灌进仓库，别用 --force 把新补丁盖成旧的；只差注释/文案可以忽略')
   } catch (错) {
     记('skip', '没能比对运行时代码', String(错.message || 错))
   }
