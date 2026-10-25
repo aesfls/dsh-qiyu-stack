@@ -10,6 +10,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "test": "node test/run.mjs",
     "doctor": "node bin/qiyu.mjs doctor",
     "init": "node bin/qiyu.mjs init"
   },
