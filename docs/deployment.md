@@ -214,3 +214,43 @@ qiyu doctor
 
 会逐项检查：Docker、容器、三个端口、OneBot 身份、事件流、DSH 桥，
 每项失败都带一句「怎么修」。
+
+---
+
+## 七、干净机器上实测踩过的坑
+
+这几条都是 2026-10-25 在一台全新 Windows 上真跑出来的，不是推测。
+
+### 1. 重启之后 QQ 掉登录，要重新扫码
+
+容器/DSH 重启后，NapCat 有时会重新出二维码（登录态没保住）。
+
+- **扫码那一步一定要勾「下次登录无需确认」** —— 不勾的话每次重启都要扫。
+- 掉登录时的表现：`get_login_info` 连接被关闭、容器日志里出现二维码、桥报连不上 NapCat。
+- 处理：`qiyu qr` 取码重扫，扫完再 `qiyu doctor`。数据目录不会丢，不用重建容器。
+
+### 2. 角色写自己的文件夹被拒（Windows ACL 缺写权限）
+
+表现：她写 `characters/<名字>/` 下的文件失败，DSH 弹 `danger-full-access` 审批。
+
+- 用 `diagnose-windows-sandbox-acl` 这个 skill 跑一次：它会检查整条路径的 ACL，
+  报 `writeOwner=false` 就是这个问题（对应 `icacls` 里缺 `WRITE_OWNER`）。
+- 修法：给那个目录补 FullControl（skill 里那一步会做），确认 `writeOwner=true`。
+- **不要**为了这个把整个会话提成 `danger-full-access`。
+
+### 3. 语音、刷 B 站是「可选功能」，装完不等于能用
+
+- 听语音：要跑一次 `qiyu stt`（SenseVoice 模型约 226 MB + Python 依赖）。
+  不跑的话收到语音只回「没听清（模型缺失）」，文字收发不受影响。`doctor` 会提示。
+- 刷 B 站：要跑一次 `bili_setup`（装 venv + 依赖，约 200 MB），并扫码登录 B 站。
+  没初始化时 `bili_status` 是 `loggedIn:false`。
+- 截帧需要 ffmpeg：`bili_setup` 装的 `imageio-ffmpeg` 自带一份，不用另外装；
+  也可以用 `BILI_FFMPEG` 指你自己那份。截图默认落在 `<角色>\收件箱\B站截图`，
+  这样 `qq_sticker` 才发得出去。
+
+### 4. 重装前要清干净，否则旧配置会串
+
+旧部署留下的 `~/.dsh/feiyu-mood/config.json`、`speak-up-config.json` 里可能还写着**上一次的会话 id**，
+新装完 `doctor` 会报「心情挂到了别的会话」。清理时把 `~/.dsh/feiyu-mood`、`~/.dsh/qiyu`
+和 `qq-*` 配置一起删，比事后改快。
+
