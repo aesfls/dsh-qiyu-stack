@@ -95,6 +95,9 @@ const 默认配置 = {
   群号: '', // 发到哪个群（可空）
   转私聊: true,
   转群: false,
+  // ⭐ 除了「表情包 / 收件箱 / 画板」，还允许从哪些目录发图（数组或逗号分隔的绝对路径）。
+  //   默认空 —— 想让她能发 D:\pics 里的图，就往这里加。
+  可发目录: [],
   NapCat: 'http://127.0.0.1:3000', // OneBot HTTP 接口
   容器: '', // NapCat 容器名（空 = 不管容器，只管 Docker 引擎）
   令牌: '', // OneBot 访问令牌（SnowLuma 默认会生成一个；NapCat 留空）
@@ -157,6 +160,8 @@ function 归一化(原始) {
     群黑名单们: 号们(混.群黑名单, 混.群黑名单们),
     转私聊: 布(混.转私聊, 默认配置.转私聊),
     转群: 布(混.转群, 默认配置.转群),
+    // 额外可发目录：数组、逗号串、单个字符串都认
+    可发目录们: (Array.isArray(混.可发目录) ? 混.可发目录 : 拆号(混.可发目录)).map(String).filter(Boolean),
     自己QQ: Number(混.自己QQ) || 0,
     // ⭐ 2026-10-25：配置里没填「主人」时，用角色包的 `称呼.主人` 兜底。
     //   起因：init 只写 character.json（称呼.主人），桥却只读 qq-bridge-config.json →
@@ -2072,7 +2077,8 @@ export function apply(ctx) {
             // 看起来是个路径：只准指「收件箱」或「表情包」里的（子目录也算）
             const 归一 = (p) => String(p || '').replace(/\//g, '\\').replace(/\\+/g, '\\').toLowerCase()
             const 目标 = 归一(要哪张)
-            const 允许 = [可发目录, 表情目录, 画板目录].filter(Boolean).map(归一)
+            const 额外 = (配置.可发目录们 || []).map((p) => String(p).trim()).filter(Boolean)
+            const 允许 = [可发目录, 表情目录, 画板目录, ...额外].filter(Boolean).map(归一)
             if (!允许.some((目录) => 目标 === 目录 || 目标.startsWith(目录 + '\\'))) {
               return { ok: false, 说: `只能发「${可发目录}」「${表情目录}」「${画板目录}」里的图，别的路径不行` }
             }

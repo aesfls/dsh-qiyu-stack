@@ -6,3 +6,5 @@ aiohttp>=3.9.0
 mcp>=1.0.0,<2
 # 插件用 Python 画登录二维码；不装就只能退回"只给 URL"
 qrcode[pil]>=8.0
+# 截帧用；没装系统 ffmpeg 时它就是那台"自带 ffmpeg"（约 84MB）
+imageio-ffmpeg>=0.6.0

@@ -515,7 +515,16 @@ def _find_ffmpeg():
         if p and os.path.isfile(p):
             return p
     from shutil import which
-    return which("ffmpeg")
+    got = which("ffmpeg")
+    if got:
+        return got
+    # ⭐ 2026-10-25：没装系统 ffmpeg 时，退回 imageio-ffmpeg 自带的那份
+    #   （bili_setup 会装它；装了就不用再单独装 ffmpeg）
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
 
 
 @tool()
@@ -570,9 +579,21 @@ async def bili_frame(bvid: str, second: float, width: int = 960) -> str:
     if vs is None:
         return json.dumps({"error": "拿不到这个视频的画面（可能要大会员，或者是直播/番剧）"}, ensure_ascii=False)
 
-    # ⚠⚠ 截图落盘：默认放系统临时目录（不占工作区，也不会被当成数据留下）。
-    #   想指定别的位置就设环境变量 BILI_FRAME_DIR。
-    frame_root = os.environ.get("BILI_FRAME_DIR") or str(Path(tempfile.gettempdir()) / "qiyu-bili-frames")
+    # ⚠⚠ 截图落盘：默认放到角色的「收件箱\B站截图」。
+    #   为什么不放临时目录：qq_sticker 只允许发「表情包 / 收件箱 / 画板」里的图，
+    #   放 %TEMP% 她发不出去（实测：只能把路径写成 Markdown，图片发不出来）。
+    def _default_frame_root():
+        try:
+            dsh = Path(os.environ.get("DSH_HOME") or (Path.home() / ".dsh"))
+            j = json.loads((dsh / "qiyu" / "character.json").read_text(encoding="utf-8-sig"))
+            inbox = (j.get("路径") or {}).get("收件箱")
+            if inbox:
+                return str(Path(inbox) / "B站截图")
+        except Exception:
+            pass
+        return str(Path(tempfile.gettempdir()) / "qiyu-bili-frames")
+
+    frame_root = os.environ.get("BILI_FRAME_DIR") or _default_frame_root()
     out_dir = Path(frame_root)
     try:
         out_dir.mkdir(parents=True, exist_ok=True)

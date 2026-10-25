@@ -12,6 +12,7 @@ import { 读配置 } from './config.mjs'
 import { 跑, 沙箱受限过 } from './run.mjs'
 import { 探测DSH } from './dsh-port.mjs'
 import { 扫 } from './localization.mjs'
+import { 模型齐了吗 } from './stt.mjs'
 
 const 包根 = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -274,6 +275,20 @@ export async function doctor({ 只输出JSON = false, 跳过WebSocket = false } 
             } else {
               记('ok', `${名}：跟桥同一个会话`)
             }
+          }
+        } catch (error) {}
+
+        // ⭐ 语音转写：可选功能，但没装的话收到语音只会回「没听清（模型缺失）」
+        try {
+          const 家目录 = process.env.DSH_HOME || join(process.env.USERPROFILE || '', '.dsh')
+          const 转写脚本 = join(家目录, 'qiyu', '语音转写.py')
+          if (existsSync(转写脚本) && !模型齐了吗()) {
+            记(
+              'warn',
+              '语音转写没装（可选）',
+              '模型不在 ' + join(家目录, 'qiyu', 'models') + '，收到语音只会回「没听清（模型缺失）」。文字收发不受影响',
+              '要用就装一次：npx dsh-qiyu-stack stt（约 226MB 模型 + Python 依赖）',
+            )
           }
         } catch (error) {}
 

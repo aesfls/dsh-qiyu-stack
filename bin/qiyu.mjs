@@ -15,6 +15,7 @@ import { deploy } from '../src/deploy.mjs'
 import { install } from '../src/install.mjs'
 import { preflight } from '../src/preflight.mjs'
 import { handover } from '../src/handover.mjs'
+import { stt } from '../src/stt.mjs'
 import { 读配置, 配置文件路径 } from '../src/config.mjs'
 
 const 参数 = process.argv.slice(2)
@@ -71,6 +72,12 @@ const 帮助 = `
        --dry-run                只列清单，不动手
        --yes                    真装（不加就只提示）
        --force                  已存在也覆盖（覆盖前自动备份）
+
+  qiyu stt                     装语音转写（可选）：SenseVoice 模型（约 226MB）+ Python 依赖
+       --check                 只看装没装
+       --dir <目录>            模型放哪（默认 <DSH_HOME>/qiyu/models）
+       --url <tar.bz2>         自己指定模型包地址（GitHub 拉不动时用）
+       --skip-model / --skip-deps   只装其中一半
 
   qiyu config                   显示配置来源（文件 / 环境变量 / 默认值）
 
@@ -149,6 +156,16 @@ async function 主() {
       干跑: 有开关('--dry-run'),
       确认: 有开关('--yes'),
       覆盖: 有开关('--force'),
+    })
+  }
+
+  if (命令 === 'stt') {
+    return await stt({
+      查: 有开关('--check'),
+      dir: 取值('--dir'),
+      url: 取值('--url'),
+      跳模型: 有开关('--skip-model'),
+      跳依赖: 有开关('--skip-deps'),
     })
   }
 

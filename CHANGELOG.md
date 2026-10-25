@@ -3,6 +3,23 @@
 > 每次发版都往这里加一段——`qiyu install` 会把当前版本的这段写进
 > `~/.dsh/qiyu/version.json`，设置里「栖语 → 版本」页签会显示它。
 
+## 0.16.2（2026-10-25）
+
+干净机器复盘的第二批（环境/可选功能）：
+
+- **新增 `qiyu stt`（可选语音转写）**：一条命令装 SenseVoice int8 模型（约 226MB）+ `sherpa-onnx` / `numpy` /
+  `imageio-ffmpeg` 依赖，模型落到 `~/.dsh/qiyu/models`（`语音转写.py` 的默认位置）。
+  默认**不装** —— 不装时收到语音只回「没听清（模型缺失）」，文字收发不受影响；`doctor` 会提示，
+  `install` 收尾会列出来。GitHub 拉不动可以用 `--url` 指自己的包。
+- **B 站截图默认落到角色目录**：`bili_frame` 原来存 `%TEMP%\qiyu-bili-frames` —— 不在 `qq_sticker`
+  可发范围内，她只能把路径写成 Markdown、图片发不出去（实测）。现在默认落到
+  `<角色>\收件箱\B站截图`（从 `character.json` 的「路径.收件箱」推），`BILI_FRAME_DIR` 仍可覆盖。
+- **B 站没装系统 ffmpeg 也能截帧**：`_find_ffmpeg` 多一条兜底 —— `imageio-ffmpeg` 自带的那份；
+  `requirements.txt` 也把它带上了（`bili_setup` 会装）。
+- **`qq_sticker` 可配置可发目录**：以前写死「表情包 / 收件箱 / 画板」，想多发一个目录只能改代码。
+  现在配置里加 `可发目录`（数组或逗号串，默认空），比如 `["D:\\pics"]`。
+- `install` 收尾多两行提示：听语音要跑 `qiyu stt`、刷 B 站要跑一次 `bili_setup`。
+
 ## 0.16.1（2026-10-25）
 
 按那台干净机器的部署复盘（19 项问题、14 项是项目问题）修的第一批：
