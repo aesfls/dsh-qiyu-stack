@@ -57,7 +57,8 @@ const 她的家文件 = ['AGENTS.md', '日记本.md']
 
 const 默认配置 = {
   开关: true,
-  模式: 'dry',
+  // 默认真拦（和参考实例一致）。要"只看不拦"，把它改成 'dry'，热生效。
+  模式: 'enforce',
   // ⭐ 留空 = 管**所有**会话（只对"外头来的那一轮"动手，所以不会误伤界面里的对话）。
   //   想只护某一个会话，就填它的 id（`session-` 前缀带不带都行）。
   目标会话: '',
@@ -65,7 +66,29 @@ const 默认配置 = {
   // 按"触发这一轮的那条消息"定来源：群里触发 → qq-group；私聊触发 → 不放拦。
   // 打包进来的群消息只当背景数据，不改变这一轮的来源。
   外部种类: ['qq-group'],
-  白名单: ['read', 'glob', 'grep', 'qq_group_say', 'qq_sticker'],
+  // ⭐ 默认白名单 = 「在群里正常说话」的全套能力 + 只读查资料。
+  //   原则：**回话全套给，执行一个都不给**。
+  //     · 给：说话、发表情包、存表情包、语音、看图、画画、撤回、禁言、present，
+  //           以及 glob（列文件）和 web/B站搜索（查资料）
+  //     · 不给：pwsh / write / edit / subagent / workflow / schedule_* / create_goal / remember / 语雀
+  //     · 故意不给 read / grep：它们和 web_fetch 凑一起就是「读文件→贴到外网」的通道。
+  //       真要放开 read，就得同时把 web_fetch 拿掉（两个只能来一个）。
+  白名单: [
+    'qq_group_say',
+    'qq_sticker',
+    'qq_sticker_save',
+    'qq_voice',
+    'qq_draw',
+    'qq_recall',
+    'qq_mute',
+    'read_image',
+    'glob',
+    'present',
+    'web_search',
+    'web_fetch',
+    'bili_search',
+    'bili_subtitle',
+  ],
   // 防卡死：标记超过这么多分钟就当没置位过。
   // 万一 turn-stopping 没触发（会话被掐 / DSH 崩），不能让她的能力永久被锁。
   标记有效期分钟: 10,

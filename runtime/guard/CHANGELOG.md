@@ -1,5 +1,18 @@
 # 更新记录 · dsh-qq-guard
 
+## 0.3.1（2026-10-25）
+
+**默认档位对齐参考实例：`enforce` + 14 项白名单**（上一版是 `dry` + 5 项，切过去会让人觉得她"残废"了）。
+
+- 默认 `模式: enforce`（真拦）
+- 默认白名单从 5 项扩到 14 项，原则是**回话全套给、执行一个都不给**：
+  `qq_group_say` / `qq_sticker` / `qq_sticker_save` / `qq_voice` / `qq_draw` / `qq_recall` / `qq_mute` /
+  `read_image` / `glob` / `present` / `web_search` / `web_fetch` / `bili_search` / `bili_subtitle`
+- 仍然不给：`pwsh` / `write` / `edit` / `subagent` / `workflow` / `schedule_*` / `create_goal` / `remember` / 语雀
+- `read` / `grep` 依然不在默认名单里：它们和 `web_fetch` 凑一起就是「读文件 → 贴到外网」的通道（两个只能来一个）
+- 拒绝话术和路标改成**按真实白名单生成**：白名单里没有 `qq_draw`，就不会再跟她说"你可以画"（以前会，等于骗她）
+- 单测跟着加：宽/窄白名单下的话术与路标各验一遍
+
 ## 0.3.0（2026-10-25）
 
 随栖语栈一起发布。这一版主要是**把"作者自己机器上的东西"从默认值里拿掉**，

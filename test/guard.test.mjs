@@ -66,9 +66,23 @@ console.log('== 5. 开关 / 目标会话 ==')
   判定({ 配置: { ...基础配置, 目标会话: 'abc' }, 会话id: 'session-abc', 工具名: 'pwsh', 是否外部轮: true }).拒 === true,
 )
 
-console.log('== 6. 拒绝时带路标（别让她反复撞墙）==')
+console.log('== 6. 拒绝时带路标，而且只指白名单里真有的工具 ==')
 const 拒命令 = 判定({ 配置: 基础配置, 会话id: 's', 工具名: 'pwsh', 是否外部轮: true })
-断言('跑命令 → 指路 qq_sticker', 拒命令.说.includes('qq_sticker') && 拒命令.说.includes('qq_draw'), 拒命令.说)
+断言('跑命令 → 指路 qq_sticker', 拒命令.说.includes('qq_sticker'), 拒命令.说)
+断言('白名单里没有 qq_draw → 就不提画画', !拒命令.说.includes('qq_draw'), 拒命令.说)
+
+// 白名单宽一点：路标和"这一轮你能干什么"都要跟着变
+const 宽配置 = { ...基础配置, 白名单: [...基础配置.白名单, 'qq_draw', 'read_image', 'qq_voice'] }
+const 拒命令宽 = 判定({ 配置: 宽配置, 会话id: 's', 工具名: 'pwsh', 是否外部轮: true })
+断言('白名单有 qq_draw → 提画画', 拒命令宽.说.includes('qq_draw'), 拒命令宽.说)
+const 拒宽 = 判定({ 配置: 宽配置, 会话id: 's', 工具名: 'remember', 是否外部轮: true })
+断言(
+  '拒绝话术列出真实能力（画画 / 看图 / 语音）',
+  拒宽.说.includes('画画') && 拒宽.说.includes('看图') && 拒宽.说.includes('发语音'),
+  拒宽.说,
+)
+const 拒窄 = 判定({ 配置: { ...基础配置, 白名单: ['qq_group_say'] }, 会话id: 's', 工具名: 'pwsh', 是否外部轮: true })
+断言('白名单只剩回话 → 只承诺回话，不乱许愿', 拒窄.说.includes('只给你回话') && !拒窄.说.includes('画'), 拒窄.说)
 const 拒记忆 = 判定({ 配置: 基础配置, 会话id: 's', 工具名: 'remember', 是否外部轮: true })
 断言('写记忆 → 说明不写', 拒记忆.说.includes('记忆'), 拒记忆.说)
 

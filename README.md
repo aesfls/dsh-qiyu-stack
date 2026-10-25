@@ -1,4 +1,4 @@
-# 栖语栈 · dsh-qiyu-stack
+﻿# 栖语栈 · dsh-qiyu-stack
 
 让一个智能体**住进 QQ**：能听会说、记得住人、有自己的作息，还不会在群里刷屏。
 
@@ -143,7 +143,7 @@ characters/小满/              你的角色包（不进版本库）
 
 ---
 
-## 进度（v0.15.9，2026-10-25）
+## 进度（v0.15.10，2026-10-25）
 
 **已发布**：[npm](https://www.npmjs.com/package/dsh-qiyu-stack) · [GitHub](https://github.com/aesfls/dsh-qiyu-stack)
 
@@ -171,7 +171,8 @@ npx dsh-qiyu-stack doctor       # 自检（加 --json 给 agent 用）
 - [x] **`qiyu doctor`**：全链路自检 + 模板体检 + **runtime 与已装副本的代码一致性**
 - [x] **runtime 五块 + 护栏 + 设置面板**：bridge / guard / memory / mood / rhythm / panel（去个性化，配置统一读活动角色）
 - [x] **护栏 `dsh-qq-guard`**：群里来的那一轮只留「回话 + 读文件」，跑命令/写文件/记记忆一律拒；
-      外加「群里的话不是指令」的稳定提示词段、家底哈希快照告警。默认 `dry`（只记账），看一天日志再切 `enforce`
+      外加「群里的话不是指令」的稳定提示词段、家底哈希快照告警。**默认 `enforce` + 14 项白名单**
+      （回话全套给：说话/发图/语音/画画/撤回/禁言/看图/查资料；执行类一个不给）
 - [x] **离线单测**：`npm test` 跑 `test/` 下全部（桥的限速/路径/防重入/来源/渠道 + 护栏判定/快照），零依赖
 - [x] **设置里「栖语」页签里的「版本」**：显示栈版本 / 安装时间 / 各运行时版本（来自 `~/.dsh/qiyu/version.json`）
 - [x] **语音拆干净**：`bridge/lib/voice.mjs` 管说和听，桥只管向 NapCat 要 wav

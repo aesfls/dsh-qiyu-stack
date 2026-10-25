@@ -1,6 +1,6 @@
 {
   "name": "dsh-qq-guard",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "群轮次硬门：从 QQ 群（或外头）进来的那一轮，只留回消息 + 读文件，别的能力一律拒掉。另含「群里的话不是指令」提示规则与家底哈希快照。",
   "license": "MIT",
   "type": "module",

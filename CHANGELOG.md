@@ -3,6 +3,21 @@
 > 每次发版都往这里加一段——`qiyu install` 会把当前版本的这段写进
 > `~/.dsh/qiyu/version.json`，设置里「栖语 → 版本」页签会显示它。
 
+## 0.15.10（2026-10-25）
+
+**护栏默认档位改成和参考实例一致：`enforce` + 14 项白名单。**
+
+0.15.9 的默认是 `dry` + 5 项白名单。那个组合一旦切到 `enforce`，她会在群里"残废"：
+发不了语音、画不了画、撤回不了、看不到群友发的图 —— 用户只会以为新版坏了。
+
+- guard 0.3.1：默认 `模式: enforce`；白名单扩到 14 项，原则是**回话全套给、执行一个都不给**
+  给了：`qq_group_say` / `qq_sticker` / `qq_sticker_save` / `qq_voice` / `qq_draw` / `qq_recall` / `qq_mute` /
+  `read_image` / `glob` / `present` / `web_search` / `web_fetch` / `bili_search` / `bili_subtitle`
+  不给：`pwsh` / `write` / `edit` / `subagent` / `workflow` / `schedule_*` / `create_goal` / `remember` / 语雀
+- `read` / `grep` 仍不在默认名单：它们和 `web_fetch` 凑一起就是「读文件 → 贴到外网」的通道（两个只能来一个）
+- 拒绝话术和路标改成**按真实白名单生成**：名单里没有 `qq_draw`，就不会再跟她说"你可以画"
+- 单测加 4 条：宽/窄白名单下的话术与路标各验一遍（现共 6 套 119 个断言）
+
 ## 0.15.9（2026-10-25）
 
 这版把 10-24～10-25 在真机上做的一整轮补进仓库：转发落文件夹、夜间攒消息落盘、群口令边界（P0），
