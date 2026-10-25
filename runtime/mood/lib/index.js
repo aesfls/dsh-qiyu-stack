@@ -1,7 +1,7 @@
-// DSH 大肥鱼心情 · 宿主半边
+// 心情插件 · 宿主半边
 //
 // 干四件事：
-//   1. 心情**全局一份**（.dsh/feiyu-mood/state.json），属于「大肥鱼」这个人，跨会话共享
+//   1. 心情**全局一份**（.dsh/feiyu-mood/state.json），属于这个角色，跨会话共享
 //   2. 只在设置里选定的那个会话里，每轮聊完用 DSH 自己的模型判断心情涨跌（不是关键词硬猜）
 //   3. 按设置把心情告诉目标会话（systemPrompt.context，保住 DeepSeek 前缀缓存）
 //   4. 开 /dsh-feiyu-mood/state 给界面面板读
@@ -98,11 +98,12 @@ function textOfMessage(p) {
 // --------------------------------------------------------------------------
 // 配置（本地 json，DSH 插件设置外自己管；没有就用默认）
 // --------------------------------------------------------------------------
-const DEFAULT_SESSION = 'session-4d6beaf3-3d88-4548-8dc3-63a109d36e37'
+// 留空 = 没选目标会话（不挂载）。在设置里选一个，或由安装时写入。
+const DEFAULT_SESSION = ''
 
 const DEFAULTS = {
   targetSession: DEFAULT_SESSION,
-  selfName: '大肥鱼',
+  selfName: '',
   // ⭐ 默认叫「用户」。别人装完不填也不会串成别人的名字；
   //    想改成自己的称呼，设置页第一栏填上就行，提示词里会跟着变。
   ownerName: '用户',
@@ -831,7 +832,7 @@ export function apply(ctx) {
     try {
       const list = ctx.agents.list() || []
       const target = cfg.targetSession
-      // 只给目标会话（大肥鱼）挂
+      // 只给目标会话挂
       for (const agent of list) {
         const sid = sessionIdOf(agent.session)
         if (!sid || sid !== target || mounted.has(sid)) continue

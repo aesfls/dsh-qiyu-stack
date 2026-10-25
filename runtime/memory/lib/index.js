@@ -10,7 +10,7 @@
 //   2. 取   —— 用「它自己会话里最近一句用户消息」当线索，按 P = C×(基础+鲜活+重要+情绪) 选几条
 //   3. 注   —— 注入到它自己的系统提示词里，**每条都带时间**
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, copyFileSync, rmSync, statSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, copyFileSync, rmSync, statSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, basename, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -206,6 +206,13 @@ const DIAG = join(CFG_DIR, 'fish-memory-diag.log')
 function diag(msg) {
   try {
     mkdirSync(STORE_DIR, { recursive: true })
+    // 2026-10-25（issue #2）：以前只 append、没有上限 —— 实测一天长 1.2MB、一年上百 MB，
+    // 而且这是宿主事件循环里的同步写。现在超过 1MB 就轮转成 `.1`（只留一代，覆盖旧的）。
+    let 多大 = 0
+    try { 多大 = statSync(DIAG).size } catch (error) { 多大 = 0 }
+    if (多大 > 1024 * 1024) {
+      try { renameSync(DIAG, DIAG + '.1') } catch (error) {}
+    }
     writeFileSync(DIAG, new Date().toISOString() + '  ' + msg + '\n', { flag: 'a' })
   } catch (error) {}
 }
@@ -308,11 +315,77 @@ function backupStore(sid) {
   } catch (error) {}
 }
 
-function saveStore(sid, data) {
+// ---------- ⭐ 写库前合并（2026-10-24 修「记忆会静默丢失」）----------
+//
+// 事故：用户报「连着记两条，第二条几秒后从库里消失，没有任何报错」。
+// 真因：自动扩词是「读整份 → await 模型（几秒）→ 整份写回」——
+//   等模型那几秒里别人新记的记忆，被它那句 writeFileSync 用**旧快照**盖掉了 ✗
+//   同样的写法还有提炼 / 扩词 / 补标 / 洗称呼（它们跑得更久，更容易吞掉新记忆）。
+//
+// 修法：**写之前把盘上现在的内容读回来，按 id 合并**，而不是整份覆盖。
+//   · 记忆按 id 取并集；同一条两边都有 → 取「更新时间更晚」的那份
+//   · 「已删」按 id 取并集 —— **删除优先**：进了已删的不会被复活
+//   · 写方把它放回 memories 的（撤回 / 找回）→ 从已删里摘掉（撤回要能生效）
+//   · 召回记录按时间合并，只留最近 100
+// ⚠ 真销毁（清空已删 / 彻底删一条）不能让合并把它们捡回来 —— 那两处走 raw（见 saveStore）
+function 合并库(盘, 写) {
+  const 更新时间 = (m) =>
+    Math.max(
+      Date.parse(m.editedAt || 0) || 0,
+      Date.parse(m.relatedAt || 0) || 0,
+      Date.parse(m.reinforcedAt || 0) || 0,
+      Date.parse(m.deletedAt || 0) || 0,
+      Date.parse(m.createdAt || 0) || 0,
+    )
+  const 写记 = new Map((写.memories || []).map((m) => [String(m.id), m]))
+  const 合记 = new Map((盘.memories || []).map((m) => [String(m.id), m]))
+  for (const [id, m] of 写记) {
+    const 旧 = 合记.get(id)
+    if (!旧) {
+      合记.set(id, m)
+      continue
+    }
+    // 两次写都碰过这一条：谁的更新时间晚听谁的（避免旧快照把新内容改回去）
+    合记.set(id, 更新时间(m) >= 更新时间(旧) ? m : 旧)
+  }
+  const 删们 = new Map((盘.deleted || []).map((m) => [String(m.id), m]))
+  for (const m of 写.deleted || []) 删们.set(String(m.id), m)
+  // 写方把它放回了 memories（撤回 / 找回）→ 已删里就不该再有它
+  for (const id of 写记.keys()) 删们.delete(id)
+  const 删ids = new Set([...删们.keys()])
+  const memories = [...合记.values()].filter((m) => !删ids.has(String(m.id)))
+  const 记录表 = new Map()
+  const 键 = (t) => String(t && t.at) + '|' + String((t && t.query) || '').slice(0, 80)
+  for (const t of 写.traces || []) 记录表.set(键(t), t)
+  for (const t of 盘.traces || []) if (!记录表.has(键(t))) 记录表.set(键(t), t)
+  const traces = [...记录表.values()].sort((a, b) => (a.at || 0) - (b.at || 0)).slice(-100)
+  return {
+    version: 2,
+    policy: 写.policy || 盘.policy,
+    memories,
+    traces,
+    deleted: [...删们.values()],
+  }
+}
+
+function saveStore(sid, data, 选项) {
   try {
     mkdirSync(STORE_DIR, { recursive: true })
-    if (data.traces.length > 100) data.traces = data.traces.slice(-100)
     if (!Array.isArray(data.deleted)) data.deleted = []
+    if (!Array.isArray(data.traces)) data.traces = []
+    // ⭐ 2026-10-24：**写之前先把盘上的读回来合并**，不许拿旧快照整份盖
+    //   （详见 合并库 上面那段：自动扩词等模型那几秒里新记的记忆，就是这么丢的）
+    //   raw = 真销毁（清空已删 / 彻底删一条），那时**不许**把盘上的捡回来
+    if (!(选项 && 选项.raw)) {
+      let 盘 = null
+      try {
+        盘 = JSON.parse(readFileSync(storePath(sid), 'utf8'))
+      } catch (error) {
+        盘 = null // 文件不存在 / 坏了 → 就按这次的要写
+      }
+      if (盘 && Array.isArray(盘.memories)) data = 合并库(盘, data)
+    }
+    if (data.traces.length > 100) data.traces = data.traces.slice(-100)
     // 记忆变了才备份（只写 trace 的时候不备，不然一天几百份）
     const sig = memSig(data.memories)
     if (lastSig.get(String(sid)) !== sig) {
@@ -325,11 +398,33 @@ function saveStore(sid, data) {
 
 // ---------- 配置（哪些会话开启 + 她自己叫什么 + 用户的称呼）----------
 
+/** 读配置文件的字节当文本 —— 顺带把 Windows 上常见的三种 BOM 都去掉。
+ *  2026-10-25（issue #1 里那位用户踩到的）：
+ *    · PowerShell `Set-Content -Encoding UTF8` → UTF-8 BOM
+ *    · PowerShell 5.1 `Out-File` / `>` 重定向 → **UTF-16LE**（这个最坑，JSON.parse 一片 NUL）
+ *  以前直接 readFileSync(...,'utf8') → JSON.parse 抛错 → return {} ⇒ 所有会话静默「关着」。 */
+function 读配置文本() {
+  const 字节 = readFileSync(CFG_PATH)
+  // UTF-16LE（PowerShell 5.1 的 Out-File / > 重定向默认就是它）
+  if (字节.length >= 2 && 字节[0] === 0xFF && 字节[1] === 0xFE) return 字节.subarray(2).toString('utf16le')
+  // UTF-16BE（少见，但别的工具会写）
+  if (字节.length >= 2 && 字节[0] === 0xFE && 字节[1] === 0xFF) {
+    const 换 = Buffer.from(字节.subarray(2))
+    for (let i = 0; i + 1 < 换.length; i += 2) { const t = 换[i]; 换[i] = 换[i + 1]; 换[i + 1] = t }
+    return 换.toString('utf16le')
+  }
+  // UTF-8（带不带 BOM 都行：用码位判断，不往源码里塞不可见字符）
+  let 文 = 字节.toString('utf8')
+  if (文.charCodeAt(0) === 0xFEFF) 文 = 文.slice(1)
+  return 文
+}
+
 function loadCfg() {
   try {
-    const raw = JSON.parse(readFileSync(CFG_PATH, 'utf8'))
+    const raw = JSON.parse(读配置文本())
     return raw && typeof raw === 'object' ? raw : {}
   } catch (error) {
+    try { diag('配置文件读不了（可能是 BOM / 写坏了）：' + String((error && error.message) || error)) } catch (error2) {}
     return {}
   }
 }
@@ -409,7 +504,11 @@ function migrateSwitch() {
 // 记的时候、注入的时候，都把「她自己的名字」换成「我」✓
 
 // 她自己叫什么（每个会话一个）。没设 = 不替换。
-/** 活动角色（$DSH_HOME/qiyu/character.json）里的名字，当兜底。 */
+//
+// ⭐ 本地补丁（不是上游的）：活动角色（$DSH_HOME/qiyu/character.json）里的名字当兜底。
+//   为什么：她的设置页里没给这个会话填过名字，上游逻辑下 selfNameOf 返回 '' ⇒ 不替换 ⇒
+//   记忆里会出现「某某说……」而不是「我说……」。角色包里本来就有名字，拿来兜底最自然。
+//   补丁从 v1.2.1 原样带过来（2026-10-25 升级 v1.2.5 时重贴，目标位置未变）。
 function 角色名() {
   try {
     const j = JSON.parse(readFileSync(join(CFG_DIR, 'qiyu', 'character.json'), 'utf8').replace(/^\uFEFF/, ''))
@@ -1231,15 +1330,23 @@ async function 自动扩词(ctx, sid, 上限 = 2) {
     const r = await 问模型(ctx, agent, 扩词系统_v2, 输入, 6000)
     if (!r || !r.ok) { diag('自动扩词：模型没回（' + ((r && r.message) || '?') + '）'); return 0 }
     const 表 = 解析扩词(r.text, 要扩.length)
+    // ⚠⚠ 2026-10-24 修（用户报「记忆静默丢失」的**真凶**就在这几行）：
+    //   原来是拿 await **之前**的快照 `data` 整份写回 —— 等模型那几秒里
+    //   别人新记的记忆会被这一句直接盖掉（时间线证据：记完第 2 条 9 秒后被吞）。
+    //   → 现在等完**重新读一遍**，按 id 找到那几条再改。
+    const 目标ids = 要扩.map((m) => String(m.id))
+    const 新库 = loadStore(sid)
     let 改了 = 0
     for (const k of Object.keys(表)) {
-      const m = 要扩[Number(k)]
-      if (!m) continue
+      const id = 目标ids[Number(k)]
+      if (!id || !Array.isArray(表[Number(k)])) continue
+      const m = (新库.memories || []).find((x) => String(x.id) === id)
+      if (!m) continue // 这中间它被删了 / 被合了 → 跳过，别硬写
       m.related = 表[Number(k)]
       m.relatedAt = new Date().toISOString()
       改了++
     }
-    if (改了) saveStore(sid, data)
+    if (改了) saveStore(sid, 新库)
     diag('自动扩词：' + sid + ' 补了 ' + 改了 + '/' + 要扩.length + ' 条（' + (Date.now() - t0) + 'ms，' + (r.provider || '?') + '/' + (r.model || '?') + '）')
     return 改了
   } catch (error) {
@@ -3671,11 +3778,15 @@ export function apply(ctx) {
   }
 
   // 给每个活着的 agent 挂它自己的那段记忆
+  let 上次心跳 = ''        // 只用来判断「agents 数变了没」，不再每 3 秒写一行日志
   function tick() {
     try {
       const list = ctx.agents.list() || []
       const 归档的 = 归档名单(ctx)
-      diag('tick：agents=' + list.length)
+      // 2026-10-25（issue #2）：这行以前每 3 秒无条件写，占整个日志的 97%；
+      // 心跳没什么诊断价值 —— 只在「agent 数变了」时记一条。
+      const 心跳 = 'agents=' + list.length
+      if (心跳 !== 上次心跳) { 上次心跳 = 心跳; diag('tick：' + 心跳) }
       for (const agent of list) {
         const sid = sessionIdOf(agent.session)
         if (!sid) { diag('  跳过：拿不到会话 id'); continue }
@@ -3719,11 +3830,27 @@ export function apply(ctx) {
           }
           continue
         }
-        if (mounted.has(sid)) continue
+        // ⭐⭐ 2026-10-24 修（用户报：「已经有消息的会话，开记忆拿不到 remember 工具」）：
+        //   原来这里只按**会话 id** 记账（`mounted.has(sid)`）——只要挂过一次，
+        //   以后这个会话就再也不挂。可 **agent 实例是会被换掉的**
+        //   （会话重开、插件重载、宿主重建 agent 都会换一个新对象），
+        //   旧注册跟着旧 ctx 一起没了，而我们这边的账还写着「已挂上」⇒ 永远不重挂 ✗
+        //   症状正好是：空会话开记忆→当场挂在活着的那个 agent 上→能用；
+        //   有消息的会话→早就被换过实例→记账说挂上了、实际那个实例上没有工具。
+        //   → 现在连**实例**一起记：实例变了就卸旧的、重新挂。
+        const 已挂 = mounted.get(sid)
+        if (已挂 && 已挂.agent === agent) continue // 还是同一个 agent，不用重挂
+        if (已挂) {
+          try {
+            已挂.off()
+          } catch (error) {}
+          mounted.delete(sid)
+          diag('  agent 实例换过了，重挂 ' + sid)
+        }
         diag('  试挂 ' + sid)
         try {
           const off = mountFor(agent, sid)
-          mounted.set(sid, { sid, off })
+          mounted.set(sid, { sid, agent, off })
           diag('  ✓ 挂上 ' + sid + '（' + loadStore(sid).memories.length + ' 条）')
         } catch (error) {
           diag('  ✗ 挂 ' + sid + ' 失败：' + (error && error.message))
@@ -4535,7 +4662,7 @@ export function apply(ctx) {
           const n = data.deleted.length
           data.deleted = data.deleted.filter((m) => String(m.id) !== id)
           if (data.deleted.length !== n) {
-            saveStore(sid, data)
+            saveStore(sid, data, { raw: true }) // 真销毁：不许合并把盘上的捡回来
             diag('彻底清掉一条：' + sid + ' / ' + id)
             out = { ok: true, message: '彻底清掉了' }
           }
@@ -4544,7 +4671,7 @@ export function apply(ctx) {
           // ⚠⚠ 2026-09-23：**真销毁** —— 动之前另存一份带时间戳的（见 销毁前另存 的说明）✓
           销毁前另存(sid)
           data.deleted = []
-          saveStore(sid, data)
+          saveStore(sid, data, { raw: true }) // 真销毁：不许合并把盘上的捡回来
           diag('清空已删掉的：' + sid + '（' + n + ' 条）')
           out = { ok: true, message: '清掉了 ' + n + ' 条（清空前的整份另存在「销毁前」里）' }
         } else if (action === 'batchdelete') {
@@ -5859,6 +5986,10 @@ mroute('/dsh-fish-memory/wash-keys/undo', async (req, res) => {
 }
 
 export {
+  // 2026-10-25：给自测用（诊断日志轮转、配置去 BOM）
+  diag,
+  loadCfg,
+  DIAG,
   recall,
   render,
   relTime,

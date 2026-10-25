@@ -3,7 +3,7 @@
 **给 DSH 里的会话一份会淡忘的长期记忆 —— 每条都带时间。**
 
 聊得越久，上下文越挤。压缩一次，前面的事就淡了。
-这个插件替她记着：**该记的记下来，想起来的时候自己会想起来，不重要的事慢慢淡掉。**
+这个插件替它记着：**该记的记下来，想起来的时候自己会想起来，不重要的事慢慢淡掉。**
 
 > 名字里的「鱼」来自 **DeepSeek 的鲸鱼** —— 鲸鱼也是鱼嘛。
 > 另一半是「七秒记忆」那个梗：鱼的记性差，所以得替它记着。
@@ -36,18 +36,95 @@
 
 ## 装法
 
+在 DSH 里：**设置 → 插件 → 安装**，填下面这一行；或者命令行：
+
+```
+github:Yuuyuko-uu/dsh-fish-memory
+```
+
 ```sh
 dsh plugin --profile web add github:Yuuyuko-uu/dsh-fish-memory
 ```
+
+（`--profile` 照你平时那个写：网页端一般 `web`，桌面端一般 `desktop`。）
 
 装完**重启一次 DSH**。
 
 重启后，打开 **设置 → 鱼的记忆**。
 
 > 还没上 npm，所以**要用上面那条 GitHub 的**。
-> （以后要是上了 npm，`dsh plugin --profile web add dsh-fish-memory` 也能用。）
+> （以后要是上了 npm，`dsh plugin add dsh-fish-memory` 也能用。）
+> ⭐ 最省事的一条：把仓库链接贴给你自己的 DSH，说「**帮我装这个插件**」。
+
+### 装完起不来？先看这个
+
+如果 DSH 弹「The application could not start」，错误里有 `Unexpected token '﻿'`、`is not valid JSON`、
+`readProfileManifest` —— 那是 profile 的 `package.json` 被存成了 **UTF-8 带 BOM**。
+**跟插件无关**：内容都是对的，只是开头多了三个看不见的字节，DSH 读它就崩。
+
+**先找出来**（不同装法位置不一样，别猜 —— 真正的 profile 目录里同时有 `cordis.yml`、`cordis.patch.yml`、`package.json`；机器上别处那些同名的都不算）：
+
+```powershell
+Get-ChildItem C:\,D:\,E:\ -Directory -Filter profiles -Recurse -Depth 4 -ErrorAction SilentlyContinue |
+  ForEach-Object {
+    Get-ChildItem $_.FullName -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+      $p = Join-Path $_.FullName 'package.json'
+      if ((Test-Path (Join-Path $_.FullName 'cordis.patch.yml')) -and (Test-Path $p)) {
+        $b = [System.IO.File]::ReadAllBytes($p)
+        $bom = ($b.Length -ge 3 -and $b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF)
+        "{0}   BOM={1}" -f $p, $bom
+      }
+    }
+  }
+```
+
+**输出里 `BOM=True` 的那一行，就是要修的文件**（标准安装在 `%USERPROFILE%\.dsh\profiles\<档名>\package.json`）。
+去掉 BOM（路径换成上面那一行）：
+
+```powershell
+$p = "把上面 BOM=True 那一行的路径粘到这里"
+[System.IO.File]::WriteAllText($p, [System.IO.File]::ReadAllText($p), (New-Object System.Text.UTF8Encoding($false)))
+```
+
+然后重启 DSH 就好，**数据一点没丢**。实在进不去时，那个错误框里的
+**「Disable third-party plugins, back up profile patch, and restart」** 能先起来，再一个个开回去定位。
+
+> ⚠️ 手动改 profile 里的文件，一律存 **UTF-8 无 BOM**。让 AI 帮你改时，别让它用
+> `Set-Content -Encoding UTF8` 或 `Out-File -Encoding utf8`（Windows 自带的这两个默认**带 BOM**）。
 
 ---
+
+## 更新到最新版
+
+**最省事**：把这个仓库的地址丢给你自己的 DSH，说「**帮我更新这个插件**」。装完**重启一次 DSH**。
+
+也可以点 **设置 → 鱼的记忆 最上面的「检查更新」** —— 有新版会提示，还能一键复制更新命令。
+
+命令行（`--profile` 照你平时那个写，桌面端一般 `desktop`、网页端 `web`）：
+
+```bash
+dsh plugin --profile desktop remove dsh-fish-memory
+dsh plugin --profile desktop add github:Yuuyuko-uu/dsh-fish-memory
+```
+
+> ⚠️ **必须先卸再装**：直接装可能拿到缓存里的旧副本，装完还是老的。
+> ⚠️ 装完**重启一次 DSH**才会用新代码。
+
+### 我的设置会不会丢？
+
+**不会。** 设置存在 DSH 家目录（`%USERPROFILE%\.dsh\`）里，不在插件代码里；卸载只删代码：
+
+```
+.dsh\fish-memory-config.json   （每条会话的记忆各一份）
+```
+
+所以卸载 → 重装，设置、记下来的所有记忆 都还在。
+
+三件小事提醒：
+
+- **别用「重装 DSH」来更新插件** —— 那是两件事，重装可能动到 profile。
+- **新版本新加的设置项**会用默认值（以前没这一项），想要自己的值就再填一次。
+- 设置项改名或换单位时，旧值会按规则自动换算，不用你管。
 
 ## 怎么用
 

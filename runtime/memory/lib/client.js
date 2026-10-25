@@ -2995,7 +2995,7 @@ const 洗键进度 = { 已: 0, 总: 0, 在跑: false, 干跑: false }
                             React.createElement('input', {
                               style: Object.assign({}, S.inp, { flex: 1, width: 'auto', minWidth: 140 }),
                               value: 生成存到,
-                              placeholder: '要存的完整路径（比如 D:\\档案\\生成的档案.md）',
+                              placeholder: '要存的完整路径（比如 C:\\path\\to\\生成的档案.md）',
                               onChange: (e) => set生成存到(e.target.value),
                             }),
                             React.createElement(

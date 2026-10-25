@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { 读配置 } from './config.mjs'
 import { 跑, 沙箱受限过 } from './run.mjs'
 import { 探测DSH } from './dsh-port.mjs'
+import { 扫 } from './localization.mjs'
 
 const 包根 = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -326,44 +327,27 @@ export async function doctor({ 只输出JSON = false, 跳过WebSocket = false } 
     记('skip', '没能比对运行时代码', String(错.message || 错))
   }
 
-  // ---------- 8. 模板体检：不许把「某个人的东西」当默认值 ----------
+  // ---------- 8. 本地化体检：作者机器上的东西不许进 runtime / 模板 ----------
+  //
+  // ⚠ 以前只扫 templates/ —— 而真正漏出去的是 runtime/ 里的代码
+  //   （0.15.8 发到 npm 上的「有人加千语的好友」就是这么漏的）。
+  //   规则和 `tools/扫本地化.mjs` 共用 src/localization.mjs 一份。
   try {
-    const 模板目录 = resolve(包根, 'templates')
-    if (existsSync(模板目录)) {
-      const 规则 = [
-        { 名: '别人的本机路径', 正则: /[A-Z]:\\\\(Users|AI)\\\\/i },
-        { 名: '作者的角色名', 正则: /云千语|小鱿鱼/ },
-        { 名: '像 QQ 号的数字', 正则: /(^|[^\d])\d{8,11}([^\d]|$)/ },
-        { 名: '令牌', 正则: /SESSDATA|mQ-[A-Za-z0-9_-]{12,}/ },
-      ]
-      const 问题 = []
-      const 走 = (目录) => {
-        for (const 名 of readdirSync(目录)) {
-          const p = join(目录, 名)
-          let st
-          try {
-            st = statSync(p)
-          } catch {
-            continue
-          }
-          if (st.isDirectory()) {
-            走(p)
-            continue
-          }
-          if (!/\.(json|md|tpl|yml|yaml|mjs|js)$/i.test(名)) continue
-          const 文 = readFileSync(p, 'utf8')
-          for (const r of 规则) if (r.正则.test(文)) 问题.push(`${名}：${r.名}`)
-        }
-      }
-      走(模板目录)
-      if (问题.length) {
-        记('warn', '模板里有可疑的私人值', 问题.slice(0, 4).join('；'), '默认值必须是空的或中性的；作者真实的号/路径/称呼不许写进模板')
-      } else {
-        记('ok', '模板体检通过：没有别人的私人值')
-      }
+    const 扫的 = ['templates', 'runtime', 'examples'].map((d) => resolve(包根, d)).filter((p) => existsSync(p))
+    const { 命中, 文件数 } = 扫(扫的)
+    if (命中.length) {
+      const 例 = 命中.slice(0, 4).map((h) => `${h.文件}:${h.行}（${h.规则}）`)
+      记(
+        'warn',
+        '代码/模板里有本地化内容',
+        例.join('；') + (命中.length > 4 ? ` 等 ${命中.length} 处` : ''),
+        '作者机器上的路径 / 角色名 / 号码 / 会话 id / 凭证不许进仓库：把默认值留空，或改成读 character.json。跑 `node tools/扫本地化.mjs` 看全部',
+      )
+    } else {
+      记('ok', `本地化体检通过：${文件数} 个文件里没有别人的私人值`)
     }
   } catch (错) {
-    记('skip', '跳过模板体检', String(错.message || 错))
+    记('skip', '跳过本地化体检', String(错.message || 错))
   }
 
   // ---------- 沙箱兜底：读不到子进程输出时，别把「没装/没起」当成事实 ----------
