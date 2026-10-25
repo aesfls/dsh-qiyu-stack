@@ -4,11 +4,24 @@
 
 ## 一句话状态
 
-**0.15.10 已发（npm + GitHub）：护栏默认 = 参考实例的档位（`enforce` + 14 项白名单）。**
+**0.16.0 待发：魔改插件（刷B站 / 忘掉）进栈了，仓库里不再有本地化内容。**
 
-- npm：`dsh-qiyu-stack@0.15.10`（`latest`，2026-10-25 发布）
+- npm：`dsh-qiyu-stack@0.15.10`（`latest`）；**0.16.0 本地已就绪、没发**
 - GitHub：<https://github.com/aesfls/dsh-qiyu-stack>（公开，main）
 - 真机实例（作者本人那台）：桥 **p35** 在跑，`qiyu doctor` 0 fail
+
+## 2026-10-25 晚：魔改插件入栈 + 本地化体检（0.16.0）
+
+1. **同步她那边的升级**：`fish-memory 1.2.5`（写库前按 id 合并 —— 修「连记两条、第二条几秒后静默消失」；diag 日志超 1MB 轮转）。
+   顺手确认 mood / speak-up 的 `plugin-src` 是**过期副本**（真机跑的和仓库一致），没跟着同步，否则会把已有修正删掉。
+2. **魔改插件入栈**：`runtime/bili`（刷 B 站 0.4.1，自带 python vendor，首次用时自己拉 uv）、`runtime/forget`（0.1.0）。
+   `install` 现在装 8 块；`doctor` 逐块比对。用户不用再单独拉插件、也不用让 DSH 在本地改。
+3. **本地化体检**：`src/localization.mjs` + `tools/扫本地化.mjs` + `npm run check:local`；
+   `doctor` 从只扫 `templates/` 扩到 `runtime/` + `examples/`；`npm test` 里也有一条闸（仓库不干净就红）。
+   扫 86 个文件 0 命中。这次清掉的真实泄漏：mood 的 `selfName: '大肥鱼'`、写死的真实会话 id、
+   memory 文档里的 `D:\档案`、examples 的「云千语」、bili 的 `ownerName: '小鱿鱼'` 与 vendor 里三条硬编码路径。
+
+⚠ 已知副作用：mood 的默认目标会话现在是空（以前写死了一个会话 id），新装用户要自己在设置里选。
 
 ## 2026-10-25：把生产追回仓库（0.15.9）
 
