@@ -4,9 +4,9 @@
 
 ## 一句话状态
 
-**0.15.10 待发：护栏默认改成和参考实例一样（`enforce` + 14 项白名单）。**
+**0.15.10 已发（npm + GitHub）：护栏默认 = 参考实例的档位（`enforce` + 14 项白名单）。**
 
-- npm：`dsh-qiyu-stack@0.15.9`（`latest`）；**0.15.10 本地已就绪、没发**
+- npm：`dsh-qiyu-stack@0.15.10`（`latest`，2026-10-25 发布）
 - GitHub：<https://github.com/aesfls/dsh-qiyu-stack>（公开，main）
 - 真机实例（作者本人那台）：桥 **p35** 在跑，`qiyu doctor` 0 fail
 
@@ -41,8 +41,9 @@
 
 ### 这次没做的
 
-- 真机上跑的护栏还是 0.2.1（仓库这份是 0.3.0：默认值去私人化）。真机要升级得走那台机器的维护会话 ——
-  `doctor` 会因此一直提示 `guard/lib/*` 两边不一样，这是**预期内**的，别用 `--force` 硬同步。
+- 真机上跑的护栏还是 0.2.1（仓库这份是 0.3.1：默认值去私人化 + `enforce` + 14 项白名单）。
+  真机要升级得走那台机器的维护会话 —— `doctor` 会因此一直提示 `guard/lib/*` 两边不一样，这是**预期内**的，
+  别用 `--force` 硬同步。
 - `doctor` 的模板体检只扫 `templates/`，`runtime/` 里再冒出私人值它看不见（这次就是这么漏进 0.15.8 的）。
 - GitHub 推送要关 TLS 校验：这台机器上 `github.com` 的证书链验不过（`UNABLE_TO_VERIFY_LEAF_SIGNATURE`），
   npm registry 正常。临时用 `git -c http.sslVerify=false push`，**别写进配置**。
