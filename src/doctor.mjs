@@ -302,6 +302,8 @@ export async function doctor({ 只输出JSON = false, 跳过WebSocket = false } 
       ['memory', 'dsh-fish-memory'],
       ['mood', 'dsh-feiyu-mood'],
       ['rhythm', 'dsh-speak-up'],
+      ['bili', 'dsh-bili-subagent'],
+      ['forget', 'dsh-forget'],
       ['panel', 'dsh-qiyu-panel'],
     ]
     const 问题 = []

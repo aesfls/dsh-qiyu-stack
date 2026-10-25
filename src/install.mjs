@@ -26,8 +26,10 @@ const 红 = (s) => `\x1b[31m${s}\x1b[0m`
 const 灰 = (s) => `\x1b[90m${s}\x1b[0m`
 
 // runtime 下这几个目录就是要装的块（voice 目前只是脚本，不当插件装）
-// guard 是护栏：群轮次限权 + 「群里的话不是指令」+ 家底快照。默认 dry（只记账不拦）。
-const 模块目录 = ['bridge', 'guard', 'memory', 'mood', 'rhythm', 'panel']
+// guard 是护栏：群轮次限权 + 「群里的话不是指令」+ 家底快照。
+// bili 是刷B站（自带 python vendor，首次用时自己拉 uv / 装依赖）。
+// forget 是「让她自己决定忘掉什么」。
+const 模块目录 = ['bridge', 'guard', 'memory', 'mood', 'rhythm', 'bili', 'forget', 'panel']
 
 /**
  * 一个目录的"指纹"：相对路径 → 内容哈希。

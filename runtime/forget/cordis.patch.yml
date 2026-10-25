@@ -1,0 +1,6 @@
+# DSH「忘掉」—— 她自己觉得没意义了就放下，腾出地方继续聊
+# ⚠ 照 fish-memory / bili 的写法：id 用短名，跟 lib/host.js 导出的 name 一致。
+
+- insert:
+    - id: forget
+      name: dsh-forget

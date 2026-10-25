@@ -1,17 +1,23 @@
-# runtime/ —— 运行时五块
+# runtime/ —— 运行时八块（+ 设置面板）
 
-这里放「一个角色真正活着需要的代码」：QQ 桥、记忆、心情、语音、作息。
+这里放「一个角色真正活着需要的代码」：QQ 桥、护栏、记忆、心情、作息、刷 B 站、忘掉、语音，以及设置面板。
 
 **来源**：全部是从一台真在跑的机器上（`~/.dsh/profiles/desktop/node_modules/`）原样搬过来的，
 不是照文档重写的。搬完做了「去个性化」：私人路径、角色名、QQ 号、令牌，一个不留。
 
+`npm run check:local`（或 `qiyu doctor`）会扫一遍，确认这些没被写回去。
+
 | 块 | 来源插件 | 体积 | 状态 |
 |---|---|---|---|
-| `bridge/` | dsh-qq-bridge 0.2.0 | 155 KB | ✅ 已搬 + 去个性化 |
-| `memory/` | dsh-fish-memory | 1.8 MB | ✅ 已搬（含 1 MB 中文词典，分词用） |
-| `mood/` | dsh-feiyu-mood | 500 KB | ✅ 已搬（含五张表情图） |
-| `rhythm/` | dsh-speak-up 0.2.0 | 119 KB | ✅ 已搬 |
-| `voice/` | 语音转写.py + `bridge/lib/voice.mjs` | 3.4 KB + 4 KB | ✅ 说/听都抽出来了 |
+| `bridge/` | dsh-qq-bridge 0.2.0 | 249 KB | ✅ 已搬 + 去个性化 |
+| `guard/` | dsh-qq-guard 0.3.1 | 33 KB | ✅ 群轮次限权 + 「群里的话不是指令」+ 家底快照 |
+| `memory/` | dsh-fish-memory 1.2.5 | 1.8 MB | ✅ 已搬（含 1 MB 中文词典，分词用） |
+| `mood/` | dsh-feiyu-mood 0.4.0 | 499 KB | ✅ 已搬（含五张表情图） |
+| `rhythm/` | dsh-speak-up 0.2.0 | 169 KB | ✅ 已搬 |
+| `bili/` | dsh-bili-subagent 0.4.1 | 349 KB | ✅ 刷 B 站（含 python vendor，首次用时自己拉 uv） |
+| `forget/` | dsh-forget 0.1.0 | 7 KB | ✅ 她自己决定忘掉什么 |
+| `panel/` | dsh-qiyu-panel 0.1.1 | 12 KB | ✅ 设置页合并成「栖语」一个页签 |
+| `voice/` | 语音转写.py + `bridge/lib/voice.mjs` | 4 KB | ✅ 说/听都抽出来了 |
 
 ---
 

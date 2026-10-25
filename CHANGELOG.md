@@ -3,6 +3,21 @@
 > 每次发版都往这里加一段——`qiyu install` 会把当前版本的这段写进
 > `~/.dsh/qiyu/version.json`，设置里「栖语 → 版本」页签会显示它。
 
+## 0.16.0（2026-10-25）
+
+把作者在真机上魔改过的插件**整体搬进栈里** —— 用户不用再去 GitHub 单独拉插件、拉回来还要让 DSH 改。
+
+- 新增 `runtime/bili`（dsh-bili-subagent 0.4.1，刷 B 站）：子代理读字幕挑内容、写内部报告，伙伴用自己的口吻发评论 / 私信。**自带 python vendor**（bilibili MCP），首次用时插件自己拉 uv + 装依赖，用户不需要会 Python
+- 新增 `runtime/forget`（dsh-forget 0.1.0）：她自己决定忘掉什么 —— 把聊过的一大段压成「她还记得的」，腾出空间继续聊
+- `install` 现在装 **8 个块**（bridge / guard / memory / mood / rhythm / bili / forget / panel）；`doctor` 逐块比对
+- `memory` 1.2.1 → 1.2.5：写库前按 id 合并（修「连记两条、第二条几秒后静默消失」）；diag 日志超 1MB 轮转
+- **本地化体检**：新增 `src/localization.mjs`（规则一份）+ `tools/扫本地化.mjs` + `npm run check:local`。
+  `doctor` 的体检范围从 `templates/` 扩到 **`runtime/` + `examples/`**（0.15.8 那条「有人加千语的好友」就是从 runtime 漏出去的）。
+  6 条规则：作者机器路径 / 作者角色名 / 写死会话 id / 写死 QQ 群号 / 凭证 / 写死称呼。`npm test` 里也有一条：仓库不干净就红
+- 清掉的真实泄漏：mood 的 `selfName: '大肥鱼'` 与写死的真实会话 id、memory 文档里的 `D:\档案`、
+  examples 里的「云千语」、bili 的 `ownerName: '小鱿鱼'` 与 vendor 里三条硬编码路径
+- ⚠ mood 的默认目标会话变成空（以前写死了一个会话 id）——新装用户要在设置里选目标会话
+
 ## 0.15.10（2026-10-25）
 
 **护栏默认档位改成和参考实例一致：`enforce` + 14 项白名单。**

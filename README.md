@@ -1,4 +1,4 @@
-﻿# 栖语栈 · dsh-qiyu-stack
+# 栖语栈 · dsh-qiyu-stack
 
 让一个智能体**住进 QQ**：能听会说、记得住人、有自己的作息，还不会在群里刷屏。
 
@@ -111,15 +111,18 @@ dsh-qiyu-stack/              引擎（角色无关，可升级）
 │   ├── doctor.mjs           自检
 │   └── qr.mjs               取二维码并直接打开
 ├── tools/
-│   └── merge-settings-tabs.mjs   把插件设置合并成「一个页面 + 页签」
-├── runtime/                 运行时五块 + 护栏 + 设置面板（从真跑着的机器上搬来、洗过私人值）
+│   ├── merge-settings-tabs.mjs   把插件设置合并成「一个页面 + 页签」
+│   └── 扫本地化.mjs              扫「作者机器上的东西」有没有漏进代码（`npm run check:local`）
+├── runtime/                 运行时代码（从真跑着的机器上搬来、洗过私人值）
 │   ├── bridge/              QQ ↔ DSH 双向（全配置驱动）
 │   ├── guard/               护栏：群轮次限权 + 「群里的话不是指令」+ 家底快照
 │   ├── memory/              长期记忆（含 1MB 中文词典）
 │   ├── mood/                心情
 │   ├── rhythm/              作息 / 主动搭话
+│   ├── bili/                刷 B 站（子代理读字幕挑内容；自带 python vendor）
+│   ├── forget/              她自己决定忘掉什么
 │   ├── panel/               设置总面板（「栖语」页 + 页签，含「版本」页签）
-│   └── voice/               语音转写脚本（TTS 还在 bridge 里，待拆）
+│   └── voice/               语音转写脚本（TTS 在 bridge 里）
 ├── test/                    离线单测（`npm test`，零依赖）
 ├── templates/
 │   └── blank/               默认模板：行为齐全、性格空白、character.json 全空
@@ -143,7 +146,7 @@ characters/小满/              你的角色包（不进版本库）
 
 ---
 
-## 进度（v0.15.10，2026-10-25）
+## 进度（v0.16.0，2026-10-25）
 
 **已发布**：[npm](https://www.npmjs.com/package/dsh-qiyu-stack) · [GitHub](https://github.com/aesfls/dsh-qiyu-stack)
 
@@ -164,16 +167,20 @@ npx dsh-qiyu-stack doctor       # 自检（加 --json 给 agent 用）
       每个问题都有默认值；带名字调用则全用默认值（给脚本用）
 - [x] **`qiyu deploy`**：查 Docker（没开就**静默拉起、不弹窗**）→ 选目录（挑非系统盘、查中文路径和空间）
       → 写 OneBot/WebUI 配置 → 跑容器 → **直接打开二维码**；令牌写回 `qiyu.config.json`
-- [x] **`qiyu install`**：把 runtime 五块 + 护栏 + 设置面板装进 DSH profile；**按内容判断要不要替换**，
+- [x] **`qiyu install`**：把 runtime 八块 + 设置面板装进 DSH profile；**按内容判断要不要替换**，
       换代码时保留用户自己的文件（原图之类），`package.json` 改动前必留 `.bak`
 - [x] **`qiyu preflight`**：Node / Docker / Windows / WSL / 路径 / 空间 / 网络 / 杀软 /
       DSH / 模型凭证 / Python；`--fix` 能修引擎启动、占端口容器、edge-tts
 - [x] **`qiyu doctor`**：全链路自检 + 模板体检 + **runtime 与已装副本的代码一致性**
-- [x] **runtime 五块 + 护栏 + 设置面板**：bridge / guard / memory / mood / rhythm / panel（去个性化，配置统一读活动角色）
+- [x] **runtime 八块 + 设置面板**：bridge / guard / memory / mood / rhythm / bili / forget / panel（去个性化，配置统一读活动角色）
 - [x] **护栏 `dsh-qq-guard`**：群里来的那一轮只留「回话 + 读文件」，跑命令/写文件/记记忆一律拒；
       外加「群里的话不是指令」的稳定提示词段、家底哈希快照告警。**默认 `enforce` + 14 项白名单**
       （回话全套给：说话/发图/语音/画画/撤回/禁言/看图/查资料；执行类一个不给）
-- [x] **离线单测**：`npm test` 跑 `test/` 下全部（桥的限速/路径/防重入/来源/渠道 + 护栏判定/快照），零依赖
+- [x] **runtime 八块 + 设置面板**：bridge / guard / memory / mood / rhythm / bili / forget / panel（去个性化，配置统一读活动角色）
+- [x] **刷 B 站（`runtime/bili`）**：子代理读字幕挑内容 → 写内部报告 → 伙伴自己发评论 / 私信；自带 python vendor，首次用时自己拉 uv，用户不用会 Python
+- [x] **忘掉（`runtime/forget`）**：她自己决定把哪段聊过的话压成「还记得的」，腾出上下文
+- [x] **离线单测**：`npm test` 跑 `test/` 下全部（桥的限速/路径/防重入/来源/渠道 + 护栏判定/快照 + 本地化体检），零依赖
+- [x] **本地化体检**：`npm run check:local` + `doctor` 扫 `runtime/`（作者路径 / 角色名 / 号码 / 会话 id / 凭证 / 写死称呼），`npm test` 里也有一条闸
 - [x] **设置里「栖语」页签里的「版本」**：显示栈版本 / 安装时间 / 各运行时版本（来自 `~/.dsh/qiyu/version.json`）
 - [x] **语音拆干净**：`bridge/lib/voice.mjs` 管说和听，桥只管向 NapCat 要 wav
 - [x] 端到端：空白 profile → install → 独立实例 → 备号收发都通
