@@ -4,6 +4,23 @@
 
 名字来自「栖」——模型不是被调用一次就消失的 API，它得有地方住：有人格、有记忆、有作息的日常。
 
+> ## ⚠ 预览版（0.16.3）
+>
+> **核心链路可用**：QQ 私聊 / 群聊、长期记忆、作息、护栏（群轮次限权）。
+> **三样东西要额外初始化才会工作**——没初始化不会报错，只是那部分不动，新手最容易在这里以为"装坏了"：
+>
+> | 功能 | 还差一步 | 大概成本 |
+> |---|---|---|
+> | 听语音 | `npx dsh-qiyu-stack stt` | 226 MB 模型 + Python 依赖 |
+> | 刷 B 站 | 让她跑一次 `bili_setup`，再扫 B 站登录码 | 约 200 MB |
+> | 心情涨跌 | 设置里给「心情」选目标会话（新装默认为空） | 一次点击 |
+>
+> **已知门槛**（不是 bug，是环境）：Docker Hub 在国内可能拉不动镜像；重启后 QQ 可能要重扫；
+> Windows 上角色目录可能缺 ACL 写权限。三条都写在
+> [docs/deployment.md 第七节](docs/deployment.md#七干净机器上实测踩过的坑)。
+>
+> 装完请跑一次 `qiyu doctor`，它是唯一的验收标准。
+
 ---
 
 ## 它解决什么问题
@@ -71,7 +88,8 @@ npx dsh-qiyu-stack init
 # 3. 起 NapCat —— 一条命令：建目录、写 OneBot 配置、跑容器、出码
 npx dsh-qiyu-stack deploy --qq 你的QQ号
 
-# 4. 把运行时（QQ 桥/记忆/心情/作息）装进 DSH，并让她成为「活动角色」
+# 4. 把 8 个块（QQ 桥 / 护栏 / 记忆 / 心情 / 作息 / 刷B站 / 忘掉 / 设置面板）装进 DSH，
+#    并让她成为「活动角色」
 npx dsh-qiyu-stack install --character 小满 --yes      # 装完重启 DSH（关掉窗口再开，不用重启电脑）
 
 # 5. 扫码（图会自动打开），然后自查
@@ -81,10 +99,15 @@ npx dsh-qiyu-stack doctor
 #    · 新建会话，工作目录选 install 打印的那个绝对路径（部署文件夹里的 characters/小满）
 #      她的 AGENTS.md 在这一层，DSH 才会每轮读到；别选 DSH 默认工作区，也别选 ~/.dsh/qiyu
 #    · 设置 → 通到 QQ → 「目标会话」选这个会话，再打开「总开关」
+#    · 设置 → 心情 → 「目标会话」也选同一个（不选它不会挂载）
 #    · 再跑一次 npx dsh-qiyu-stack doctor：目标会话应该是 ok
 
 # 7. 写交接文档 —— 以后升级 / 换会话 / 回退都从这份开始
 npx dsh-qiyu-stack handover
+
+# 8. 可选：听语音 / 刷 B 站（不做也能收发文字）
+npx dsh-qiyu-stack stt          # 语音转写：226MB 模型 + Python 依赖
+# 刷 B 站：装好后让她第一次说「帮我刷下 XX 方向」，会自动跑 bili_setup；然后扫 B 站登录码
 ```
 
 > **用 npx 也没关系。** `install` 会先把运行时装一份到 `~/.dsh/qiyu/runtime/`，
@@ -96,6 +119,25 @@ npx dsh-qiyu-stack handover
 每条失败都带一句怎么修。
 
 > **刷 B 站已在本栈里**：`runtime/bili`（`dsh-bili-subagent`）随安装就装好；mood 另外提供「到点提醒」的钩子。
+
+---
+
+## 卡住了怎么办
+
+先跑 `qiyu doctor`（加 `--json` 给 agent 看）。它是唯一的验收标准：`有失败: false` 才算装好。
+
+| 现象 | 十有八九是 | 怎么办 |
+|---|---|---|
+| 装完她不回消息 | **目标会话没选** / 总开关没开 | doctor 里这两项会是 fail/warn，按它说的改 |
+| QQ 里发消息没反应 | 好友备注跟身份表前缀对不上 | 把对方备注改成 `称呼.主人`；或设置里加一条身份表 |
+| `docker pull` 卡住 / 超时 | 国内拉不动 Docker Hub | `deploy --image <加速站前缀>/mlikiowa/napcat-docker:latest`，或在 Docker Engine 设置里加 `registry-mirrors` |
+| 重启后又要扫码 | 登录态没保存 | `qiyu qr` 重扫；手机确认页勾上「下次登录无需确认」 |
+| 收到语音只回「没听清（模型缺失）」 | 语音转写没装 | `npx dsh-qiyu-stack stt` |
+| 刷 B 站报「子代理没跑完」 | 子代理 provider 指错了 | 设置 → 栖语 → 刷B站，把 provider/model 留空（= 用 DSH 当前默认） |
+| 群里让她发语音 / 画画被拒 | 护栏白名单 | 设置里看群里能做什么；要加就把工具名加进白名单（热生效） |
+| 写自己的文件弹 `danger-full-access` 审批 | Windows ACL 缺写权限 | 见 [docs/deployment.md](docs/deployment.md) 第七节第 2 条，**别**直接提权 |
+| doctor 说「运行时代码两边不一样」 | 你本地改过插件 | 先看方向，别 `--force`（会把新补丁盖成旧的） |
+| 心情永远不涨 | 心情的目标会话还是旧的/空的 | doctor 现在会直接报「挂到了别的会话」 |
 
 ---
 
