@@ -8,7 +8,7 @@
 //
 // ⚠ 安全默认：总开关 = false、试运行 = true —— 不手动打开，一句都不会真的发到 QQ。
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, renameSync, copyFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,6 +17,12 @@ import { execFile, execFileSync, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 
 const 执行 = promisify(execFile)
+import { 扫 as 扫可疑 } from './可疑话术.mjs'
+import { 解析时段, 判时段, 校验作息, 成文件, 成分 } from './作息.mjs'
+import { 渲, 估token, 缩放 } from './画板.mjs'
+// ⭐ 2026-10-25 p31：发送限速（防风控）。10-24 账号被封，最吻合的原因是「行为频率」：
+//   0.37 秒连发、10 分钟 22 条、秒回零冷却。所有外发都过 发一个()，在那里统一压节奏。
+import { 还要等多久, 记一笔, 说多久, 回复前等多久 } from './限速.mjs'
 import { createSelfUpdate } from './selfupdate.mjs'
 import { 合成语音 as 生语音, 转写音频, 存Wav } from './voice.mjs'
 import { loadHostDeps } from './hostdeps.mjs'
@@ -41,6 +47,18 @@ const 路由前缀 = '/dsh-qq-bridge'
 const 角色目录 = join(目录, 'qiyu')
 const 角色文件 = join(角色目录, 'character.json')
 
+// ⭐ 夜间攒消息 / 水位：落盘。电脑关机、DSH 重启都不丢；
+//   打包给她之后清空，下一晚重新攒。
+const 状态文件 = process.env.QQ_BRIDGE_STATE || join(目录, 'qq-bridge-pending.json')
+function 读持久状态() {
+  try {
+    return JSON.parse(readFileSync(状态文件, 'utf8').replace(/^\uFEFF/, '')) || {}
+  } catch (error) {
+    return {}
+  }
+}
+const 上回状态 = 读持久状态()
+
 function 读角色() {
   try {
     return JSON.parse(readFileSync(角色文件, 'utf8').replace(/^\uFEFF/, ''))
@@ -52,7 +70,9 @@ function 读角色() {
 const 角色 = 读角色() || {}
 const 表情目录 = process.env.QQ_STICKER_DIR || (角色.路径 && 角色.路径.表情包) || join(角色目录, '表情包')
 const 收件目录 = process.env.QQ_INBOX_DIR || (角色.路径 && 角色.路径.收件箱) || join(角色目录, '收件箱')
-const 语音目录 = join(角色目录, '语音')
+const 语音目录 = process.env.QQ_VOICE_DIR || (角色.路径 && 角色.路径.语音) || join(角色目录, '语音')
+// ⭐ 2026-10-24 19:00：她的画板。画完的 PNG 落在 画板\作品\，这里放开成可发目录。
+const 画板目录 = process.env.QQ_CANVAS_DIR || (角色.路径 && 角色.路径.画板) || join(角色目录, '画板')
 const 日志上限 = 60
 
 // ⭐ 合成语音放在模块作用域：qq_voice 工具和轮询都用它。
@@ -119,14 +139,22 @@ function 归一化(原始) {
   const 是对象 = 原始 && typeof 原始 === 'object' && !Array.isArray(原始)
   const 混 = 是对象 ? { ...默认配置, ...原始 } : { ...默认配置 }
   const 字 = (v) => (typeof v === 'string' ? v.trim() : '')
+  // ⭐ 2026-10-24 P0-2b：群号 / 群黑名单 既接受「逗号串」，也接受 /state 交回来的数组。
+  //    原来只认字符串：设置页把 /state 的配置原样存回来时，「群黑名单们」是数组 ⇒ 被当成空 ⇒ 黑名单被悄悄清掉。
+  const 拆号 = (v) => String(v == null ? '' : v).split(/[,，\s]+/).filter(Boolean)
+  const 号们 = (串, 数组) => {
+    const 从串 = 拆号(串)
+    if (从串.length) return 从串
+    return Array.isArray(数组) ? 数组.map((x) => String(x).trim()).filter(Boolean) : []
+  }
   const 出 = {
     总开关: 布(混.总开关, 默认配置.总开关),
     试运行: 布(混.试运行, 默认配置.试运行),
     目标会话: 字(混.目标会话),
     私聊QQ: 字(混.私聊QQ),
     群号: 字(混.群号),
-    群号们: 字(混.群号).split(/[,，\s]+/).filter(Boolean),
-    群黑名单们: 字(混.群黑名单).split(/[,，\s]+/).filter(Boolean),
+    群号们: 号们(混.群号, 混.群号们),
+    群黑名单们: 号们(混.群黑名单, 混.群黑名单们),
     转私聊: 布(混.转私聊, 默认配置.转私聊),
     转群: 布(混.转群, 默认配置.转群),
     自己QQ: Number(混.自己QQ) || 0,
@@ -145,6 +173,9 @@ function 归一化(原始) {
     转写依赖路径: 字(混.转写依赖路径) || 默认配置.转写依赖路径,
     事件地址: 字(混.事件地址),
     事件令牌: 字(混.事件令牌),
+    // ⭐ 2026-10-24 P0-1：管理接口的令牌。默认空 = 只认「浏览器来源」（见 管理请求可信）。
+    //    填了以后，命令行/脚本调 /save 之类必须带 x-qiyu-admin 头。
+    管理令牌: 字(混.管理令牌),
   }
   // ⭐ 身份表为空、但设了「主人」→ 按「备注 = 称呼」自动生成一条。
   //    这样 init 只问「她该怎么称呼你」也能用，不会退回到某个人的爸爸/妈妈。
@@ -342,43 +373,51 @@ export function apply(ctx) {
   const 日志 = []
   let 上一轮 = { 轮号: -1, 文本: '' }
   const 已发轮 = new Set()
-  const 已转消息 = new Set() // 已经转发进 DSH 的 QQ 消息 id（防重复转）
-  let 上次私聊时间 = Math.floor(Date.now() / 1000) // 从这一刻起只认新消息，不补旧的
-  let 上次群时间 = Math.floor(Date.now() / 1000)
+  const 已转消息 = new Set(Array.isArray(上回状态.已转消息) ? 上回状态.已转消息 : []) // 已经转发进 DSH 的 QQ 消息 id（防重复转）
+  // ⭐ 水位从磁盘恢复：关机这段时间里来的消息，重启后还能接着读
+  let 上次私聊时间 = Number(上回状态.上次私聊时间) || Math.floor(Date.now() / 1000)
+  let 上次群时间 = Number(上回状态.上次群时间) || Math.floor(Date.now() / 1000)
   // ⭐ 这一轮是谁从 QQ 挑起的：{ uid, 标签 }（私聊）或 { 群号, 群名, 称呼 }（群聊）。
   //    为空 = 不是 QQ 引起的（爸爸在界面说的），不回发
   let 待回 = null
+  // ⭐ 2026-10-24 20:00：这一轮的**发起人 QQ 号**。给"只有爸妈能触发"这类判断用。
+  //    不按群名片比对（谁都能把名片改成「爸爸」），只认 QQ 号。
+  let 本轮发起QQ = 0
   // ⭐ 入群邀请 / 申请：待处理的，等爸爸点头
   let 待批入群 = [] // [{ id, 群号, 群名, 邀请人, 邀请人号, 类型 }]
   const 已处理申请 = new Set()
   let 上次查申请 = 0
 
-  // ⭐⭐ 作息时段（2026-10-22 晚加的）：她累不累，决定消息要不要现在给她
-  //   用户定的节律：0-9 休息（关机）/ 9-20 惰性 / 20-24 活跃
+  // ⭐⭐ 作息时段：她累不累，决定消息要不要现在给她
+  //
   //   四象限（用户选方案乙）：
   //              | 群闲聊 | 群里@她      | 私聊(爸妈)
   //     休息     | 攒着   | 攒着         | 攒着
   //     惰性     | 攒着   | 立刻给+劝退  | 立刻给
   //     活跃     | 立刻给 | 立刻给       | 立刻给
-  //   ⭐ 时段（用户 22:32 定的，按**分钟**，支持半点）：
-  //      休息 00:00–08:30 / 惰性 08:30–19:30 / 活跃 19:30–24:00
-  //   ⚠ 必须和 speak-up 里的 判作息() 一致，改一边就改另一边。
-  const 作息边界 = {
-    休息止: 8 * 60 + 30, // 08:30
-    惰性止: 19 * 60 + 30, // 19:30
+  //
+  //   ⭐ 2026-10-24 18:40 改：时段不再写死，改成读**共享数据文件**
+  //      `$DSH_HOME/qiyu/schedule.json`（speak-up 那边早就支持读它覆盖，只是文件一直不存在）。
+  //      这样"她自己的作息"只有一份真源，桥上判、她在工具里改，两边立刻一致；
+  //      文件坏了/没写就退回默认（休息 00:00–08:30 / 惰性 08:30–19:30 / 其余活跃）。
+  const 作息文件 = join(目录, 'qiyu', 'schedule.json')
+  const 读作息 = () => {
+    try {
+      if (!existsSync(作息文件)) return 解析时段(null)
+      return 解析时段(JSON.parse(readFileSync(作息文件, 'utf8').replace(/^\uFEFF/, '')))
+    } catch (error) {
+      return 解析时段(null)
+    }
   }
   const 作息 = () => {
     const d = new Date()
-    const 分 = d.getHours() * 60 + d.getMinutes()
-    if (分 < 作息边界.休息止) return '休息'
-    if (分 < 作息边界.惰性止) return '惰性'
-    return '活跃'
+    return 判时段(d.getHours() * 60 + d.getMinutes(), 读作息())
   }
 
   // 攒着的消息（等她进入下一个时段、有第一条消息进来时一起给她）
   // 每条：{ 时间, 行, 是私聊, 有人at我 }   —— 「行」就是已经排好的那一行文字
-  let 攒消息 = []
-  let 攒的是哪个时段的 = '' // 记着这批是哪个时段攒的，用来生成"你睡着的时候"这种话
+  let 攒消息 = Array.isArray(上回状态.攒们) ? 上回状态.攒们 : []
+  let 攒的是哪个时段的 = String(上回状态.攒时段 || '') // 记着这批是哪个时段攒的，用来生成"你睡着的时候"这种话
   const 攒上限 = 60 // 条数上限，防止惰性 11 小时 + 群聊人多把上下文撑爆
 
   /** 把一条消息塞进攒的队伍里（满了就丢最老的，保留最近的） */
@@ -386,19 +425,26 @@ export function apply(ctx) {
     if (攒的是哪个时段的 === '') 攒的是哪个时段的 = 作息()
     if (攒消息.length >= 攒上限) 攒消息.shift()
     攒消息.push(条)
+    存状态()
   }
 
-  /** 把攒的消息打包成一段话（没有就返回 ''）；调用后清空 */
+  /**
+   * 把攒的消息打包成一段话（没有就返回空文本）；调用后清空。
+   * ⭐ 2026-10-24 P1-4：改成回 `{ 文本, 含群 }` —— 调用方要知道"这一批里有没有群消息"，
+   *   有的话这一轮按群轮次算（护栏收窄），哪怕眼下这条是私聊。
+   */
   const 打包攒消息 = () => {
-    if (!攒消息.length) return ''
+    if (!攒消息.length) return { 文本: '', 含群: false }
     const 条数 = 攒消息.length
     const 哪个 = 攒的是哪个时段的 === '休息' ? '你睡着的时候' : '那会儿你不太想说话的时候'
     // 每条前面标个序号，方便她"挑着回"时指得到是第几条
     const 正文 = 攒消息.map((x, i) => `${i + 1}. ${x.行}`).join('\n')
     const 有私聊 = 攒消息.some((x) => x.是私聊)
+    const 有群 = 攒消息.some((x) => !x.是私聊)
     const 有人at = 攒消息.some((x) => x.有人at我)
     攒消息 = []
     攒的是哪个时段的 = ''
+    存状态()
     const h = new Date().getHours()
     // ⭐⭐ 让她**自己**判断：哪些要回、哪些不用回、回了的话连发的就并成一句。
     //   不要写"请逐条回复"——她会变成客服。要像一个人翻手机：这几条都得回，那几条算了。
@@ -407,14 +453,41 @@ export function apply(ctx) {
       (有私聊 ? '\n有人是专门找你说的，那种通常得回一下。' : '') +
       (有人at ? '\n有人在群里 @ 你，回不回也由你——真不想理就放着。' : '') +
       '\n同一件事被好几个人提过，回一句就够了，别一条一条回。'
-    return (
-      `（${哪个}，这些人说过话，现在一起给你（共 ${条数} 条）：\n\n${正文}\n\n` +
-      `现在 ${h} 点多了。${问一句}）`
-    )
+    return {
+      文本:
+        `（${哪个}，这些人说过话，现在一起给你（共 ${条数} 条）：\n\n${正文}\n\n` +
+        `现在 ${h} 点多了。${问一句}）`,
+      含群: 有群,
+    }
   }
 
   // ⭐ 每个群各自的水位（两个群不能共用一个「上次看到哪」）
-  const 群水位 = new Map()
+  const 群水位 = new Map(Object.entries(上回状态.群水位 || {}))
+
+  /** 把攒消息 + 水位写回磁盘（小文件，直接写；关机也不丢） */
+  function 存状态() {
+    try {
+      writeFileSync(
+        状态文件,
+        JSON.stringify(
+          {
+            攒们: 攒消息,
+            攒时段: 攒的是哪个时段的,
+            上次私聊时间,
+            上次群时间,
+            群水位: Object.fromEntries(群水位),
+            已转消息: [...已转消息].slice(-500),
+            保存时间: new Date().toISOString(),
+          },
+          null,
+          2,
+        ),
+        'utf8',
+      )
+    } catch (error) {
+      // 写不进去也不该影响收发；下次有消息再试
+    }
+  }
 
 // ⭐ 消息缓存（id → 谁说的/说了什么）：引用回复靠它还原被引用的原话
   const 消息缓存 = new Map()
@@ -501,7 +574,28 @@ export function apply(ctx) {
     } catch (error) {}
   }
 
+  // ⭐ 2026-10-25 p31：所有外发的总闸（限速）。真正送出去之前先在这里排队。
+  //   为什么放在 发一个 里而不是每个工具里：群/私聊一共十几处发消息，逐个改必漏一处。
+  //   群里连发 0.37 秒 → 现在群/私聊各自最小间隔 3 秒、每 6 条歇 90 秒（保守档）。
+  const 限速状态 = {}
+  // 只有「真的把消息送出去」的 action 才排队；查列表、试探接口之类的动作不排
+  const 排队动作 = new Set(['send_group_msg', 'send_private_msg'])
+  const 排队键 = (action) => (action === 'send_group_msg' ? 'qq-group' : 'qq-private')
+  async function 等限速(action) {
+    if (!排队动作.has(action)) return
+    const 键 = 排队键(action)
+    let 等 = 还要等多久(限速状态, 键, Date.now())
+    if (等 <= 0) return
+    // 只在「真的等得久」时记一笔，免得日志被刷屏
+    if (等 >= 5000) 记账(`发送限速：${说多久(等)}再发（${action === 'send_group_msg' ? '群' : '私聊'}）`)
+    await new Promise((r) => setTimeout(r, 等))
+    // 睡醒后可能又有别人排进来，再确认一次（避免睡眠误差导致两条同时出去）
+    等 = 还要等多久(限速状态, 键, Date.now())
+    if (等 > 0) await new Promise((r) => setTimeout(r, 等))
+  }
+
   async function 发一个(base, action, 体) {
+    await 等限速(action)
     try {
       const r = await fetch(`${base}/${action}`, {
         method: 'POST',
@@ -509,7 +603,10 @@ export function apply(ctx) {
         body: JSON.stringify(体),
       })
       const j = await r.json()
-      return { action, ok: !!(j && j.status === 'ok' && j.retcode === 0), 数据: j }
+      const 成 = !!(j && j.status === 'ok' && j.retcode === 0)
+      // 只有真的发出去了才记账；失败的不占额度（不然被限流时会更难恢复）
+      if (成 && 排队动作.has(action)) 记一笔(限速状态, 排队键(action), Date.now())
+      return { action, ok: 成, 数据: j }
     } catch (error) {
       return { action, ok: false, 数据: { 错: String((error && error.message) || error) } }
     }
@@ -681,12 +778,17 @@ export function apply(ctx) {
     }
   }
 
-  /** 手搓一条 user 消息（跟 speak-up 一样：role=user，source.kind 标成 qq，不冒充她亲手打的）。 */
-  const 手搓用户消息 = (文案) => ({
+  /**
+   * 手搓一条 user 消息（跟 speak-up 一样：role=user，source.kind 标成 qq，不冒充她亲手打的）。
+   * ⭐ 2026-10-24 P1-4：kind 分两种 —— `qq-group`（群里说的，或私聊里夹带了群消息）/ `qq-private`。
+   *   护栏插件（dsh-qq-guard）靠这个值判断"这一轮要不要收窄工具"。别改回统一的 'qq'，
+   *   否则护栏认不出群轮次，等于没装。
+   */
+  const 手搓用户消息 = (文案, 种类 = 'qq') => ({
     id: 新id(),
     role: 'user',
     content: [{ type: 'text', text: String(文案) }],
-    source: { kind: 'qq' },
+    source: { kind: String(种类) },
   })
 
   /**
@@ -694,6 +796,35 @@ export function apply(ctx) {
    * 只用 remark（她给好友起的备注），**没有备注的一律不认**——别人的昵称、群名片改成「爸爸」都没用。
    * 备注以「爸爸」开头 → 爸爸；以「妈妈」开头 → 妈妈（含「妈妈的小号」，归同一个人）。
    */
+  // ⭐ 2026-10-25 p32：NapCat 在不在线，单独记一笔。
+  //   实测的坑：DSH 和 Docker 一起退出/一起起，桥启动时 NapCat 还没回来，
+  //   于是「拉好友列表失败：fetch failed」+「好友列表里没有认得出的备注…先在她 QQ 上把备注改好」
+  //   连刷 20 秒 —— 后者是**误报**（她 13 秒后就正常收发了），会让人以为备注丢了去瞎改。
+  //   所以：连不上不等于「备注没设好」，得分开说。
+  let NapCat曾上线 = false
+  let 上次连不上日志 = 0
+  function 记离线(在不在线) {
+    if (在不在线) {
+      if (!NapCat曾上线) 记账('NapCat 已连上')
+      NapCat曾上线 = true
+      上次连不上日志 = 0
+      return
+    }
+    // 还没上线过：只记一次「等它回来」，不刷屏；也不要说成备注的问题
+    if (!NapCat曾上线) {
+      if (Date.now() - 上次连不上日志 > 30 * 1000) {
+        上次连不上日志 = Date.now()
+        记账('NapCat 还没起来（后台服务可能刚拉起），先等它回来，不轮询')
+      }
+      return
+    }
+    // 上线过又掉了：这才是真异常
+    if (Date.now() - 上次连不上日志 > 60 * 1000) {
+      上次连不上日志 = Date.now()
+      记账('和 NapCat 断了，等它回来（消息不会丢，回来后会补）')
+    }
+  }
+
   async function 刷新好友表(配置, 强制) {
     const 新鲜 = Date.now() - 好友表时间 < 5 * 60 * 1000
     if (!强制 && 新鲜 && 好友表.size) return 好友表
@@ -705,6 +836,7 @@ export function apply(ctx) {
       })
       const j = await r.json()
       if (j && j.status === 'ok' && Array.isArray(j.data)) {
+        记离线(true)
         const 新表 = new Map()
         for (const f of j.data) {
           const 备注 = String((f && f.remark) || '').trim()
@@ -724,7 +856,8 @@ export function apply(ctx) {
         }
       }
     } catch (error) {
-      记账(`拉好友列表失败：${String((error && error.message) || error)}`)
+      // ⭐ p32：连不上 ≠ 备注没设好。只在真掉线时才记，而且限频（上面 记离线 管）
+      记离线(false)
     }
     return 好友表
   }
@@ -782,7 +915,7 @@ export function apply(ctx) {
     } catch (error) {
       NapCat状态 = { 错: String((error && error.message) || error) }
     }
-    return { ok: true, 版本, 配置, 配置文件, NapCat状态, 好友表: [...好友表].map(([uid, 标签]) => ({ uid, 标签 })), 今日额度, 活着的会话: 清单, 目标情况: 配置.目标会话 && 清单.length ? 清单.filter((x) => x.id === 配置.目标会话) : [], 日志 }
+    return { ok: true, 版本, 配置, 配置文件, NapCat状态, 好友表: [...好友表].map(([uid, 标签]) => ({ uid, 标签 })), 今日额度, 活着的会话: 清单, 目标情况: 配置.目标会话 && 清单.length ? 清单.filter((x) => x.id === 配置.目标会话) : [], 攒着: 攒消息.length, 日志 }
   }
 
   const 路线 = (路径, handler) =>
@@ -800,12 +933,49 @@ export function apply(ctx) {
       }),
     )
 
+  // ⭐⭐ 2026-10-24 P0-1 · 管理路由闸
+  //   挡的是这件事：群里有人让她敲一行 Invoke-RestMethod 调 /save，就把总开关关了。
+  //   放行条件（任一满足）：
+  //     1) 带 x-qiyu-admin 头，且等于配置里的「管理令牌」（令牌非空时）
+  //     2) Origin/Referer 的 host 和本次请求的 Host 一致（= 设置页自己发的）
+  //     3) 带 Sec-Fetch-* 头（浏览器一定会带，命令行工具不会）
+  //   ⚠ 这不是密码学级的墙：Origin / Sec-Fetch 都能伪造。它只是把门槛从
+  //     「会复制一行命令」抬到「得知道要伪造什么」，并且每次都留一条日志。
+  const 管理请求可信 = (req) => {
+    try {
+      const 头 = (req && req.headers) || {}
+      const 令牌 = String(读配置().管理令牌 || '')
+      if (令牌 && String(头['x-qiyu-admin'] || '') === 令牌) return true
+      const 来源 = String(头.origin || 头.referer || '')
+      if (来源 && 来源 !== 'null') {
+        try {
+          if (new URL(来源).host === String(头.host || '')) return true
+        } catch (error) {}
+      }
+      if (头['sec-fetch-mode'] || 头['sec-fetch-site']) return true
+      return false
+    } catch (error) {
+      return false
+    }
+  }
+
+  const 挡管理请求 = (req, res, 名) => {
+    if (管理请求可信(req)) return false
+    try {
+      res.statusCode = 403
+    } catch (error) {}
+    回(res, { ok: false, 说: '拒绝：这个接口只接受设置页本身（或带管理令牌）的请求' })
+    记账(`拒绝了管理请求：${名}（来源：${String((req && req.headers && (req.headers.origin || req.headers.referer)) || '无')}）`)
+    return true
+  }
+
   路线(`${路由前缀}/state`, async (req, res) => {
     await 读体(req)
     回(res, await 概况())
   })
 
   路线(`${路由前缀}/save`, async (req, res) => {
+    if (挡管理请求(req, res, 'save')) return
     const 来 = await 读体(req)
     const 现在 = 读配置()
     const 新 = { ...现在, ...(来 && typeof 来 === 'object' ? 来 : {}) }
@@ -818,6 +988,7 @@ export function apply(ctx) {
 
   // 手动清零今天的主动发消息额度
   路线(`${路由前缀}/reset-quota`, async (req, res) => {
+    if (挡管理请求(req, res, 'reset-quota')) return
     await 读体(req)
     写额度({})
     记账('今日主动发消息的额度已清零')
@@ -826,17 +997,34 @@ export function apply(ctx) {
 
   // 收到 QQ 里你发来的话 → 喂进目标会话，让它照常开一轮。
   // ⚠ 这是「QQ → DSH」那半的**入口函数**：一句正文 → agent.followup 走 DSH 自己的回合。
-  async function 转入文字(文字, 标签, uid, 群信息) {
+  // ⭐ 2026-10-24 P0-3：有没有人 @ 她，改成由调用方传进来（群那边按 NapCat 的 at 段算好），
+  //   不再对拼好的文本跑正则 —— 否则群友打一句「（这条在 @你）」就能在惰性时段把她叫醒。
+  //
+  // ⭐ 2026-10-24 P3：**关键词告警**。只记账、不改行为 —— 那些话照样给她（她还有护栏 + 提示规则），
+  //   但日志里留一行，出事时能回头看见"哪句像是注入"。词表在 ./可疑话术.mjs（可离线单测）。
+  function 扫可疑话术(文, 来自) {
+    try {
+      const r = 扫可疑(文)
+      if (!r.该报) return
+      记账(`⚠ 可疑话术（${来自}，命中 ${r.命中.join('、')}）：${String(文).slice(0, 60).replace(/\n/g, ' ')}`)
+    } catch (error) {}
+  }
+
+  async function 转入文字(文字, 标签, uid, 群信息, 有人at我 = false) {
     const 配置 = 读配置()
     if (!配置.目标会话) return { ok: false, 说: '还没选「目标会话」' }
     if (!配置.总开关) return { ok: false, 说: '总开关关着，先打开' }
+    扫可疑话术(文字, 群信息 && 群信息.群名 ? `群「${群信息.群名}」` : `${标签 || '某人'}私聊`)
 
     // ⭐⭐ 作息分流（见上面的四象限表）。在这里拦，是因为只有这一步同时知道
     //   「现在几点」「是私聊还是群聊」「有没有人 @ 她」。
     const 现在时段 = 作息()
     const 是私聊 = !!uid
-    const 有人at我 = /（这条在 @你）/.test(String(文字 || ''))
-    const 这一行 = 是私聊 ? `[${标签 || '有人'}] ${文字}` : 文字
+    // ⭐ 2026-10-25 p35：私聊也要标渠道（`【QQ私聊】[爸爸] …`），和她看得清的群消息格式对齐。
+    //   起因：她 11:44 说「这条还是只有 [爸爸]，没标渠道」「跟面板上的一样，分不出是哪边」。
+    //   她没说错 —— 桥对群消息给了【群名】，对私聊只给了 [爸爸]，
+    //   而**面板/界面说进来的话本来就不经过桥**，所以标上 QQ私聊 反而帮她分清"桥转的"和"界面说的"。
+    const 这一行 = 是私聊 ? `【QQ私聊】[${标签 || '有人'}] ${文字}` : 文字
 
     if (现在时段 === '休息') {
       // 0-9 点：除了爸爸在界面说话，其他一律叫不醒（用户 21:47 明确要求）
@@ -861,6 +1049,44 @@ export function apply(ctx) {
 
   /** 真正送进会话（把原来 转入文字 的后半段搬到这里） */
   async function 转入正文(配置, 文字, 标签, uid, 群信息) {
+    // ⭐ 2026-10-25 p34：「阅读时间」必须排在**叫醒之前**。
+    //
+    //   踩过的坑（爸爸 11:27 转述她的话："我这边分不出来源，标签上没写"）：
+    //   p32 把等待放在「叫醒之后、followup 之前」—— 于是她**先醒了**，
+    //   但手里没有任何消息，自己在空转的那 15 秒里跑了一轮，这一轮没有桥打的来源标签
+    //   （日志顺序：11:26:53 "目标会话本来没醒着…把它叫醒了" → 11:27:08 "收到 1 条，用时 14.9 秒"）。
+    //   她没糊涂，是时序把她晾在了半路。
+    //
+    //   现在：先把要发的东西准备好 → 睡 5~15 秒（这时会话还没醒）→ 叫醒 → 立刻 followup。
+    //   她睁眼第一件事就是看到带来源标记的消息，中间没有任何空档。
+    //
+    //   打包消息也有，所以打包文案要在这里一起决定 —— 不能等 followup 时才拼（那时她可能已经醒了）。
+    //   ⚠ 打包攒消息() 是**有副作用**的（取走就清空）。所以必须把「如果最后没送成，把攒消息放回去」
+    //     这条补救做出来，否则叫醒失败时这些消息就永久丢了。
+    let 全文 = 标签 ? `【QQ私聊】[${标签}] ${文字}` : 文字
+    const 攒的原样 = { 攒消息, 时段: 攒的是哪个时段的 }
+    const 打包 = 打包攒消息()
+    const 有打包 = !!打包.文本
+    /** 没送成 → 把刚才取走的攒消息放回去（顺序不动，免得下次丢） */
+    const 还回攒消息 = () => {
+      if (!有打包) return
+      攒消息 = 攒的原样.攒消息
+      攒的是哪个时段的 = 攒的原样.时段
+      存状态()
+      记账(`没送成，把 ${攒消息.length} 条攒消息放回去了`)
+    }
+    if (有打包) 全文 = 打包.文本 + '\n\n' + 全文
+    const 来源种类 = 群信息 && 群信息.群号 && !uid ? 'qq-group' : 'qq-private'
+
+    // ── 阅读时间（在叫醒之前）──
+    const 阅读 = 回复前等多久()
+    if (!有打包) {
+      await new Promise((r) => setTimeout(r, 阅读))
+    } else {
+      // 打包场景稍微停一下就好（她本来就知道这些是之前的事）
+      await new Promise((r) => setTimeout(r, Math.min(阅读, 5000)))
+    }
+
     let agent = 找agent(配置.目标会话)
     if (!agent) {
       // ⭐ QQ 里有人说话 = 该把她叫醒。跟 speak-up 那种“自己闲得慌想开口”不同，这是有人找她
@@ -877,29 +1103,35 @@ export function apply(ctx) {
         记账(`叫醒失败：${String((error && error.message) || error)}`)
       }
     }
-    if (!agent) return { ok: false, 说: `目标会话现在没活着（${短id(配置.目标会话)}），先把它打开` }
-    // 带名字进去：她才知道这句是爸爸说的还是妈妈说的
-    let 全文 = 标签 ? `[${标签}] ${文字}` : 文字
-    // ⭐ 如果还攒着上一个时段的消息，把打包的那段**放在最前面**——
-    //   让她先知道"睡着/偷懒的时候发生了什么"，再看眼前这条。
-    const 打包 = 打包攒消息()
-    if (打包) {
-      全文 = 打包 + '\n\n' + 全文
-      记账(`把攒着的消息一起给她了（${打包.slice(0, 40)}…）`)
+    if (!agent) {
+      还回攒消息()
+      return { ok: false, 说: `目标会话现在没活着（${短id(配置.目标会话)}），先把它打开` }
+    }
+    if (有打包) {
+      记账(`把攒着的消息一起给她了（${打包.文本.slice(0, 40)}…）`)
+    }
+    // ⭐ 2026-10-24 P1-5c：按**触发这一轮的那条消息**定来源（见下面的注释）
+    if (打包.含群 && 来源种类 === 'qq-private') {
+      记账('注意：这轮是私聊挑起的，但打包里有群消息；按私聊放行（群消息只当背景）')
     }
     try {
       // ⚠⚠ 必须 await：followup 返回 Promise。不接住的话，它 reject 时（会话半死 / agent 已释放）
       //   catch 根本看不到（try 早就退出了）⇒ 未处理的 rejection ⇒ **整个 DSH 宿主退出**
       //   （2026-10-21：speak-up 同一个坑已经被用户报成"装了鱼就死了"，这里一并修）
-      await agent.followup(手搓用户消息(全文))
+      await agent.followup(手搓用户消息(全文, 来源种类))
       try {
         if (ctx.sessions && typeof ctx.sessions.flush === 'function') await ctx.sessions.flush(agent.session)
       } catch (error) {}
       // ⭐ 私聊：回给这个人；群聊：回那个群（引用挑她起来的那条）
       待回 = uid ? { uid: Number(uid), 标签 } : 群信息 && 群信息.群号 ? { 群号: Number(群信息.群号), 群名: 群信息.群名, 称呼: 群信息.称呼, 引用id: 群信息.引用id } : null
+      // ⭐ 记下这一轮是谁发起的（只认 QQ 号，不认名片）：私聊看 uid，群聊看 群信息.发起人QQ
+      本轮发起QQ = uid
+        ? Number(uid)
+        : Number((群信息 && 群信息.发起人QQ) || 0) || 0
       记账(`收到 QQ 里的话（${标签 || (群信息 && 群信息.群名) || '未知'}）→ 转进 DSH：「${全文.slice(0, 50)}${全文.length > 50 ? '…' : ''}」`)
       return { ok: true, 说: '转进去了，它会照常开一轮' }
     } catch (error) {
+      还回攒消息()
       return { ok: false, 说: `followup 失败：${String((error && error.message) || error)}` }
     }
   }
@@ -936,6 +1168,45 @@ export function apply(ctx) {
     if (/(.)\1{9,}/.test(文)) return '重复太多字，像刷屏，不发'
     return null
   }
+
+  /**
+   * ⭐ 2026-10-25 p31：群里说话前，把「本机绝对路径」剔掉。
+   *
+   * 为什么：10-24 她连着三次把本机的绝对路径（`C:\...\作品\xxx.png` 这种）原样贴进群
+   *   （19:20、19:27）。那其实是她**做不到缩图时的退路**——真人不会随手打出这种路径，
+   *   这是"不像人"的强指纹，也正好踩在风控的「内容侧」。
+   *
+   * 注意：**只清洗 qq_group_say 的文字**。
+   *   qq_sticker / qq_draw / qq_voice 参数里的完整路径只是"给工具找文件用的"，
+   *   **不会进聊天**（它们是发图片段/语音段），所以一个字都不动。
+   *
+   * 返回 { 话, 全删了 }：全删了 = 她整句就是一条路径，这种直接拒发并给路标。
+   */
+  function 清群里的路径(文字) {
+    const 原 = String(文字 || '')
+    let 净 = 原
+      // 盘符路径：W:\a\b  D:/a/b（允许中文、空格、连字符；遇到空白/中文标点就停）
+      .replace(/[A-Za-z]:[\\/][^\s<>"'|?*\r\n，。、；：！？）】》""'']*/g, '')
+      // file:/// 开头
+      .replace(/file:\/\/\/[^\s]*/gi, '')
+      // 带反斜杠的本机目录片段（比如 \character\画板\作品\x.png）
+      .replace(/[\\/][^\s\\/]+[\\/][^\s\\/]+[\\/][^\s]*\.(png|jpe?g|gif|webp|bmp|svg|mp3|wav|ogg)\b/gi, '')
+    // 删完留下的空括号/多余空白收拾一下
+    净 = 净.replace(/[（(]\s*[）)]/g, '') // 空的（）留着很怪
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/^[\s，。、；：,.;:]+|[\s，。、；：,.;:]+$/g, '')
+      .trim()
+    return { 话: 净, 全删了: !净 && !!原.trim() }
+  }
+
+  /**
+   * 群里不能贴路径时，告诉她**正确的路**（护栏 v0.2.1「拒绝要报路」的同一套思路：
+   * 只说"这轮做不了"是半句话，她会一直撞同一面墙）。
+   */
+  const 路径路标 = '群里别贴本机路径（看起来不像人在说话）。要说图/画/语音：'
+    + '发图用 qq_sticker 填「发哪张」+「群」，要小就再加「宽」（比如 400）；'
+    + '画图用 qq_draw 填「群」，画完直接发；发语音用 qq_voice 填「群」。'
+    + '这三个里面的路径只是给工具找文件用的，不会出现在聊天里。'
 
   /**
    * 事件流（OneBot WebSocket）：入群邀请靠它，HTTP 轮询拿不到。
@@ -1075,7 +1346,7 @@ export function apply(ctx) {
       }
 
       const 文 =
-        `有人加千语的好友：${谁}` +
+        `有人加她的好友：${谁}` +
         `\n\n我没同意，也没拒绝——等你定。` +
         `\n要加就在 QQ「新朋友」里通过一下，不想加就不管它。`
       const rr = await 发一个(配置.NapCat, 'send_private_msg', {
@@ -1159,6 +1430,12 @@ export function apply(ctx) {
     }
   }
 
+  // ⭐ 2026-10-25 p33：轮询防重入。
+  //   阅读时间让一轮可能跑十几秒，而轮询每 4 秒一次 —— 不加这把锁，下一轮会挤进来
+  //   拿着"同一个还没标记的列表"再跑一遍（11:06 那条消息被喂三次就是这么来的）。
+  //   有锁之后：上一轮没跑完，这一轮直接跳过（消息不会丢，下一轮还在列表里）。
+  let 轮询中 = false
+
   async function 轮询收消息() {
     const 本轮开始 = Date.now()
     let 本轮条数 = 0
@@ -1167,10 +1444,16 @@ export function apply(ctx) {
     if (!配置.总开关 || !配置.目标会话) {
       上次私聊时间 = Math.floor(Date.now() / 1000)
       上次群时间 = Math.floor(Date.now() / 1000)
+      存状态()
       return
     }
     // ⭐ 身份表：只认她好友列表里的备注。没备注的人（哪怕昵称叫「爸爸」）根本不进表
     const 表 = await 刷新好友表(配置)
+
+    // ⭐ 2026-10-25 p32：NapCat 还没上线就不要往下轮询了 —— 否则每 4 秒
+    //   「拉群列表失败」「查 get_group_msg_history 超时」刷一屏，掩盖真正的问题。
+    //   消息不会丢：她回来后会按水位补（群水位 / 上次私聊时间都落盘了）。
+    if (!NapCat曾上线) return
 
     // ⭐ 慢/坏的目标：超时后 60 秒内不再问它（免得一个 52 人群拖死整个轮询）
     const 慢目标 = new Map()
@@ -1209,8 +1492,124 @@ export function apply(ctx) {
       }
     }
 
+    // ⭐ 合并转发的聊天记录：NapCat 给的是 forward 段，里面是节点数组（可能还套一层 forward）。
+    //   每条转发单独建一个文件夹：
+    //     收件箱\转发\<时间>-<转发人>\
+    //       转发记录.md   （标明来源群 / 转发人 / 时间 / 条数）
+    //       图片\...
+    //   图片真的下载；消息里只给摘要和路径，让 agent 去读文件。
+    const 转发一段文字 = async (段, 转发人 = '有人', 触发时间 = 0) => {
+      const 时间 = 触发时间 ? new Date(Number(触发时间) * 1000) : new Date()
+      const 补2 = (n) => String(n).padStart(2, '0')
+      const 时间串 = `${时间.getFullYear()}${补2(时间.getMonth() + 1)}${补2(时间.getDate())}-${补2(时间.getHours())}${补2(时间.getMinutes())}${补2(时间.getSeconds())}`
+      const 安全 = String(转发人).replace(/[\\/:*?"<>|]/g, '_').slice(0, 20) || '有人'
+
+      let 来源 = '来源未知'
+      const 探来源 = (节点们) => {
+        for (const n of 节点们 || []) {
+          if (n.group_id) {
+            来源 = n.group_name ? '群聊「' + n.group_name + '」' : '群聊（群号 ' + n.group_id + '）'
+            return true
+          }
+          if (n.message_type === 'private') {
+            来源 = '私聊'
+            return true
+          }
+          for (const s of n.message || []) {
+            if (s.type === 'forward' && 探来源(s.data.content || [])) return true
+          }
+        }
+        return false
+      }
+      探来源(段 && 段.data && 段.data.content)
+
+      const 基 = join(收件目录, '转发')
+      let 文件夹 = join(基, 时间串 + '-' + 安全)
+      try {
+        mkdirSync(基, { recursive: true })
+        for (let i = 2; existsSync(文件夹); i++) 文件夹 = join(基, 时间串 + '-' + 安全 + '-' + i)
+        mkdirSync(文件夹, { recursive: true })
+      } catch (error) {
+        /* 建不了目录就退化成只回文字 */
+      }
+      const 图夹 = join(文件夹, '图片')
+      try {
+        mkdirSync(图夹, { recursive: true })
+      } catch (error) {}
+
+      const 行 = []
+      let 条数 = 0
+      let 图数 = 0
+      let 图总 = 0
+      const 走 = async (节点们, 深度) => {
+        for (const n of 节点们 || []) {
+          const 谁 = (n.sender && (n.sender.card || n.sender.nickname)) || String(n.user_id || '有人')
+          const 片 = []
+          for (const s of n.message || []) {
+            if (!s || !s.data) continue
+            if (s.type === 'text') 片.push(String(s.data.text || ''))
+            else if (s.type === 'image') {
+              图总++
+              if (图数 < 20) {
+                图数++
+                const 落 = await 收一张图(s, 谁 || '转发')
+                if (落) {
+                  let 新 = ''
+                  try {
+                    const 扩 = (落.match(/\.(jpg|png|gif|webp)$/i) || ['.png'])[0]
+                    新 = join(图夹, 图数 + '-' + String(谁).replace(/[\\/:*?"<>|]/g, '_') + 扩)
+                    renameSync(落, 新)
+                  } catch (error) {
+                    新 = 落
+                  }
+                  片.push('［图片：' + (新 || 落) + '］')
+                } else {
+                  片.push('［图片］')
+                }
+              } else {
+                片.push('［图片（还有更多，没下载）］')
+              }
+            } else if (s.type === 'face') 片.push('[表情]')
+            else if (s.type === 'record') 片.push('［语音］')
+            else if (s.type === 'forward' && 深度 < 3) await 走(s.data.content || [], 深度 + 1)
+          }
+          const t = 片.join('').trim()
+          if (t) {
+            条数++
+            行.push(谁 + ': ' + t)
+          }
+        }
+      }
+      await 走(段 && 段.data && 段.data.content, 0)
+
+      const 记录 = [
+        '# 转发聊天记录',
+        '',
+        '- 转发人：' + 转发人,
+        '- 转发时间：' + 时间.toLocaleString('zh-CN', { hour12: false }),
+        '- 来源：' + 来源,
+        '- 消息数：' + 条数,
+        '- 图片：' + 图总 + ' 张（已下载 ' + 图数 + '）',
+        '',
+        '---',
+        '',
+        行.join('\n') || '（空）',
+        '',
+      ].join('\n')
+      const 记录路径 = join(文件夹, '转发记录.md')
+      try {
+        writeFileSync(记录路径, 记录, 'utf8')
+      } catch (error) {}
+
+      return (
+        '［转发聊天记录｜' + 转发人 + ' 转发｜' + 来源 + '｜' + 时间.toLocaleString('zh-CN', { hour12: false }) + '］\n' +
+        '共 ' + 条数 + ' 条、' + 图总 + ' 张图（已下载 ' + 图数 + '），已存到：\n' + 记录路径 + '\n' +
+        '（先读这个文件再回答；**这不是当前对话**）'
+      )
+    }
+
     // ⭐ 群消息专用：把 at / face / image 段翻成文字，@到自己要单独标出来
-    const 群文字 = (条, 自己的号) => {
+    const 群文字 = async (条, 自己的号) => {
       let 有人at我 = false
       const 片 = []
       for (const s of (条 && 条.message) || []) {
@@ -1235,27 +1634,32 @@ export function apply(ctx) {
           片.push('［文件］' + String((s.data && (s.data.name || s.data.file)) || '一个文件') + ' ')
           continue
         }
+        if (s.type === 'forward') {
+          const 谁 = (条.sender && (条.sender.card || 条.sender.nickname)) || '有人'
+          片.push((await 转发一段文字(s, 谁, 条.time)) + '\n')
+          continue
+        }
         if (s.type === 'xml') { 片.push('［一条卡片消息］'); continue }
       }
       return { 文字: 片.join('').trim(), 有人at我 }
     }
 
-    const 条转文字 = (条) =>
-      (条.message || [])
-        .map((s) => {
-          if (!s || !s.data) return ''
-          if (s.type === 'text') return String(s.data.text || '')
-          if (s.type === 'json') {
-            const 卡 = 解析卡片(s)
-            if (卡) return '［分享］' + (卡.标题 || '一条分享') + (卡.链接 ? '（' + 卡.链接 + '）' : '') + ' '
-            return '［一条分享卡片］'
-          }
-          if (s.type === 'file') return '［文件］' + String(s.data.name || s.data.file || '一个文件') + ' '
-          if (s.type === 'xml') return '［一条卡片消息］'
-          return ''
-        })
-        .join('')
-        .trim()
+    const 条转文字 = async (条) => {
+      const 片 = []
+      const 转发人 = (条.sender && (条.sender.card || 条.sender.nickname)) || '有人'
+      for (const s of 条.message || []) {
+        if (!s || !s.data) continue
+        if (s.type === 'text') 片.push(String(s.data.text || ''))
+        else if (s.type === 'json') {
+          const 卡 = 解析卡片(s)
+          if (卡) 片.push('［分享］' + (卡.标题 || '一条分享') + (卡.链接 ? '（' + 卡.链接 + '）' : '') + ' ')
+          else 片.push('［一条分享卡片］')
+        } else if (s.type === 'file') 片.push('［文件］' + String(s.data.name || s.data.file || '一个文件') + ' ')
+        else if (s.type === 'forward') 片.push(await 转发一段文字(s, 转发人, 条.time))
+        else if (s.type === 'xml') 片.push('［一条卡片消息］')
+      }
+      return 片.join('').trim()
+    }
 
     // ⭐ 语音：实现在 ./voice.mjs（合成语音在模块顶部，qq_voice 也要用）
     const 语音收件目录 = join(收件目录, '语音')
@@ -1320,8 +1724,9 @@ export function apply(ctx) {
     }
 
     if (表.size === 0) {
-      // 一次就够，别每 4 秒刷屏
-      if (!轮询收消息.已提醒) {
+      // ⭐ p32：只有「NapCat 通着、列表也拉到了，但一个备注都对不上」才是真的备注问题。
+      //   NapCat 还没起来时说这句话会误导人去 QQ 改备注（10-25 10:57 就误报过一次）。
+      if (NapCat曾上线 && !轮询收消息.已提醒) {
         轮询收消息.已提醒 = true
         记账('好友列表里没有认得出的备注（要符合配置里「身份表」的备注前缀）—— 先在她 QQ 上把备注改好')
       }
@@ -1344,8 +1749,9 @@ export function apply(ctx) {
           if ((条.time || 0) < 上次私聊时间) continue
           if (已转消息.has(条.message_id)) continue
           const 引 = 取引用(条)
-          const 文字 = 引 + 条转文字(条)
-          记缓存(条.message_id, 标签, 条转文字(条))
+          const 转出 = await 条转文字(条)
+          const 文字 = 引 + 转出
+          记缓存(条.message_id, 标签, 转出)
           const 图们 = (条.message || []).filter((s) => s && s.type === 'image' && s.data)
           const 存好的 = []
           for (const 一张 of 图们) {
@@ -1363,12 +1769,30 @@ export function apply(ctx) {
             内容 = (内容 ? 内容 + '\n' : '') + '（' + 标签 + '发来一条语音：' + 说法 + '）'
           }
 
-          const 结果 = 内容 ? await 转入文字(内容, 标签, uid) : { ok: true }
-          if (结果 && 结果.ok) {
+          // ⭐ 2026-10-25 p33：**先把这条标记成"我在处理了"，再去等阅读时间**。
+          //
+          //   踩过的坑（爸爸 11:06 报"一条消息她读了 3 次"）：p32 加了 5~15 秒的阅读时间，
+          //   但标记写在 `await 转入文字(...)` **之后** —— 那 10~15 秒里轮询每 4 秒又跑一次，
+          //   每次都看到"这条还没标记" → 再喂一遍。日志实锤：同一句话在 11:06:39 / 11:06:43 / 11:06:51
+          //   被转了三次，用时 10.5s / 10.6s / 15.0s（等多久就重复几次）。
+          //
+          //   现在的顺序：先占位（已转消息 + 水位）→ 再等 → 再真喂。
+          //   喂失败就**撤回占位**，保持"失败下次重试"的老语义（不能让一条消息真丢掉）。
+          const 先占位 = !!条.message_id
+          if (先占位) {
             已转消息.add(条.message_id)
             上次私聊时间 = 条.time || 上次私聊时间
+            存状态()
+          }
+          const 结果 = 内容 ? await 转入文字(内容, 标签, uid) : { ok: true }
+          if (结果 && 结果.ok) {
             本轮条数++
           } else {
+            // 没喂进去：撤回占位，免得这条被当成"处理过了"永久丢掉
+            if (先占位) {
+              已转消息.delete(条.message_id)
+              存状态()
+            }
             记账(`转不进去（${标签}）：${(结果 && 结果.说) || '未知'} —— 这条先留着，下次还会重试`)
             break
           }
@@ -1394,7 +1818,7 @@ export function apply(ctx) {
           if (自己 && uid === 自己) continue
           if ((条.time || 0) < 水位) continue
           if (已转消息.has(条.message_id)) continue
-          const 群结果 = 群文字(条, 自己)
+          const 群结果 = await 群文字(条, 自己)
           let 语音尾巴 = ''
           let 图尾巴 = ''
           for (const 一 of (条.message || []).filter((s) => s && s.type === 'image' && s.data)) {
@@ -1410,6 +1834,7 @@ export function apply(ctx) {
           已转消息.add(条.message_id)
           if (!文字) continue
           群水位.set(String(群号), 条.time || 水位)
+          存状态()
           const 称呼 = 表.get(uid) || String((条.sender && (条.sender.card || 条.sender.nickname)) || '群里的人')
           const 提示 = 群结果.有人at我 ? '（这条在 @你）' : ''
           记缓存(条.message_id, 称呼, 文字, 群号, uid)
@@ -1421,7 +1846,8 @@ export function apply(ctx) {
             群名,
             称呼,
             引用id: 条.message_id,
-          })
+            发起人QQ: uid,
+          }, 群结果.有人at我)
           if (群结果2 && 群结果2.ok) 本轮条数++
         }
       }
@@ -1459,6 +1885,7 @@ export function apply(ctx) {
   }
 
   路线(`${路由前缀}/receive`, async (req, res) => {
+    if (挡管理请求(req, res, 'receive')) return
     const 来 = await 读体(req)
     const 文字 = typeof 来.text === 'string' ? 来.text.trim() : ''
     if (!文字) return 回(res, { ok: false, 说: '没有文字（body 里给 text）' })
@@ -1467,6 +1894,7 @@ export function apply(ctx) {
 
   // 手动试一发：**真发**（绕过试运行），只发一条固定测试句，动不了已发轮
   路线(`${路由前缀}/test-send`, async (req, res) => {
+    if (挡管理请求(req, res, 'test-send')) return
     await 读体(req)
     const 配置 = 读配置()
     if (!配置.私聊QQ && !配置.群号) return 回(res, { ok: false, 说: '私聊 QQ 和群号都是空的，先保存一个再试' })
@@ -1502,9 +1930,15 @@ export function apply(ctx) {
       return () => {}
     }
     const 停 = ctx.interval(() => {
-      void 轮询收消息().catch((error) => {
-        try { ctx.logger?.info(`qq-bridge: 轮询出错：${String((error && error.message) || error)}`) } catch (e2) {}
-      })
+      // ⭐ p33：上一轮还在跑（可能在等阅读时间）就跳过这一轮 —— 防重入。
+      //   这条消息不会被漏掉：它还在 NapCat 的列表里，下一轮照样会看到。
+      if (轮询中) return
+      轮询中 = true
+      void 轮询收消息()
+        .catch((error) => {
+          try { ctx.logger?.info(`qq-bridge: 轮询出错：${String((error && error.message) || error)}`) } catch (e2) {}
+        })
+        .finally(() => { 轮询中 = false })
     }, 4000)
     return () => {
       try {
@@ -1514,6 +1948,12 @@ export function apply(ctx) {
   }, 'qq-bridge: 轮询收 QQ 消息')
 
   记账(`已装好 v${版本}：DSH↔QQ 两半都在｜总开关 ${读配置().总开关 ? '开' : '关'}｜试运行 ${读配置().试运行 ? '开（只记账）' : '关（真发）'}｜收消息 4 秒轮询一次`)
+  // ⭐ 构建标记：每次改动往这里记一笔，重启后一眼能看出加载的是哪份代码。
+  //   踩过的坑：15:45 重启加载的是改之前的旧代码，结果"群里发不了语音"被当成 bug 排查了半天。
+  记账('构建 p35：+ 私聊标渠道【QQ私聊】(和群【群名】对齐，她能分清桥转的和界面说的)｜修「刚醒来说分不出来源」(阅读时间排到叫醒之前)｜修「一条消息被读三遍」(先占位+轮询防重入)｜阅读时间 5~15s｜发送间隔 4~10s、每 6 条歇 90s｜群里不贴本机路径(带路标)｜NapCat 未上线不再刷误报｜qq_mute 禁言(秒级)｜画完直接发｜存表情包也能收画板｜qq_schedule 作息｜qq_recall 撤回｜可疑话术告警（P3）｜qq_voice 群名填哪边都认｜qq_sticker_save｜来源按触发者定')
+  if (攒消息.length) {
+    记账(`从磁盘恢复了 ${攒消息.length} 条睡着时攒下的消息，等下一个消息一起给她`)
+  }
 
   // ---------- 开机后把后台服务悄悄拉起来 ----------
   // 用户不该知道 Docker 是什么：不弹窗、不进任务栏，起来了就在托盘待着。
@@ -1588,42 +2028,47 @@ export function apply(ctx) {
 
     ctx.tools.register(defineTool({
       name: 'qq_sticker',
-      description: '给爸爸或妈妈发一张图（表情包，或者收件箱里的图）。\n'
+      description: '发一张图：私聊发给某个人，或者发到某个群（表情包，或者收件箱里收到的图、你画的画）。\n'
         + '· 不填「发哪张」→ 先把可用的图列出来，你再挑一张。\n'
-        + '· 发自己截的画面 / 别人发来的图：把**完整路径**填进「发哪张」就行 '
-        + '（比如 C:\\path\\to\\图片.jpg，别人发来的图默认存在 ~/.qiyu/收件箱/）。',
+        + '· 私聊填「给谁」；发群填「群」（群名或群号）——两个二选一。\n'
+        + '· 表情包直接填名字；收件箱/画板里的图填**完整路径**（就是「发哪张」清单里那些）。\n'
+        + '· 想缩小再发就填「宽」（等比缩，比如 400）——不用自己缩图，这里直接缩。\n'
+        + '· 只能发「表情包」「收件箱」「画板」三个目录里的图，别处的不行。\n'
+        + '· 💡 私聊/面板里也能往群里发：把「群」填上就行，不用等群里的消息。',
       parameters: {
-        给谁: { type: 'string', description: '收件人：爸爸 / 妈妈' },
-        发哪张: { type: 'string', description: '表情包的名字，或者一张截图的完整路径（可以不填，先看看有哪些）' },
+        给谁: { type: 'string', description: '私聊发给谁（身份表里的称呼；和「群」二选一）' },
+        群: { type: 'string', description: '发到哪个群：群名或群号（和「给谁」二选一）' },
+        发哪张: { type: 'string', description: '表情包的名字，或收件箱/画板里一张图的完整路径（可以不填，先看看有哪些）' },
+        宽: { type: 'number', description: '（可选）缩到多宽再发，比如 400；不填就原样发' },
       },
       output: textOutput,
       async execute(args) {
         try {
           const 要哪张 = String((args && args.发哪张) || '').trim()
 
-          // ⭐ 允许发图片（2026-10-22 晚加）：她截了画面 / 别人发来的图，原来只能发表情包。
-          //   ⚠ 只认**收件箱**（含子目录，比如 B站截图）里的文件，别让她发到这个范围之外去（那是越权）。
-          //   2026-10-22 23:35 用户要求从「B站截图」放宽到整个「收件箱」。
-          const 可发目录 = process.env.QQ_STICKER_EXTRA_DIR || join(homedir(), '.qiyu', '收件箱')
+          // ⭐ 允许发图片：表情包目录，或者**收件箱**（她收到的图都在这）。
+          //   以前这里写的是 ~/.qiyu/收件箱，但收到的图实际落在 收件目录（~/.dsh/qiyu/收件箱），
+          //   两边对不上，导致「收到的图发不出去」。
+          const 可发目录 = process.env.QQ_STICKER_EXTRA_DIR || 收件目录
           const 截图目录 = 可发目录 // 兼容下面「列清单」那段
           let 命中路径 = ''
           let 命中名字 = ''
 
           if (要哪张 && /[\\/]/.test(要哪张) && /\.(png|jpe?g|gif|webp)$/i.test(要哪张)) {
-            // 看起来是个路径：只准指「收件箱」里的（子目录也算）
+            // 看起来是个路径：只准指「收件箱」或「表情包」里的（子目录也算）
             const 归一 = (p) => String(p || '').replace(/\//g, '\\').replace(/\\+/g, '\\').toLowerCase()
             const 目标 = 归一(要哪张)
-            const 目录 = 归一(可发目录)
-            if (!(目标 === 目录 || 目标.startsWith(目录 + '\\'))) {
-              return { ok: false, 说: `只能发「${可发目录}」里的图，别的路径不行` }
+            const 允许 = [可发目录, 表情目录, 画板目录].filter(Boolean).map(归一)
+            if (!允许.some((目录) => 目标 === 目录 || 目标.startsWith(目录 + '\\'))) {
+              return { ok: false, 说: `只能发「${可发目录}」「${表情目录}」「${画板目录}」里的图，别的路径不行` }
             }
             if (!existsSync(要哪张)) return { ok: false, 说: '找不到这张图：' + 要哪张 }
             命中路径 = 要哪张
             命中名字 = String(要哪张).split(/[\\/]/).pop()
           } else {
-            if (!existsSync(表情目录)) return { ok: false, 说: '表情包目录不存在' }
-            const 文件们 = readdirSync(表情目录).filter((f) => /\.(png|jpg|jpeg|gif)$/i.test(f))
-            if (!文件们.length) return { ok: false, 说: '表情包目录是空的' }
+            if (!existsSync(表情目录)) return { ok: false, 说: '表情包目录不存在：' + 表情目录 }
+            const 文件们 = readdirSync(表情目录).filter((f) => /\.(png|jpg|jpeg|gif|webp)$/i.test(f))
+            if (!文件们.length && !existsSync(可发目录)) return { ok: false, 说: '表情包目录是空的' }
             if (!要哪张) {
               // 列清单时把「收件箱」里的图也带上（含子目录，比如 B站截图），最近的排前面
               const 收件图们 = []
@@ -1641,13 +2086,28 @@ export function apply(ctx) {
               }
               if (existsSync(可发目录)) 走一遍(可发目录)
               const 最近 = 收件图们.slice(-6).map((x) => x.名)
+              // ⭐ 画板：也把最近画的几张列出来（只列 画板\作品\，不递归草稿里的源码）
+              const 画板图们 = []
+              const 画板作品 = join(画板目录, '作品')
+              if (existsSync(画板作品)) {
+                try {
+                  for (const 名 of readdirSync(画板作品)) {
+                    if (/\.(png|jpe?g|gif|webp)$/i.test(名)) 画板图们.push(名)
+                  }
+                } catch (error) {}
+              }
+              const 画板最近 = 画板图们.slice(-6)
               return {
                 ok: true,
                 可选: 文件们,
                 ...(最近.length ? { 收件箱: 最近 } : {}),
+                ...(画板最近.length ? { 画板: 画板最近 } : {}),
                 说: '表情包有：' + 文件们.join('、') +
                   (最近.length
                     ? `；收件箱里还有：${最近.join('、')}（发这些要把完整路径填进「发哪张」）`
+                    : '') +
+                  (画板最近.length
+                    ? `；画板里最近画的：${画板最近.join('、')}（同样填完整路径）`
                     : ''),
               }
             }
@@ -1658,6 +2118,54 @@ export function apply(ctx) {
           }
 
           const 配置 = 读配置()
+          const 群参数 = String((args && args.群) || '').trim()
+
+          // ⭐ 2026-10-24 19:35：**缩图不用 pwsh**。
+          //   她在群里想"先缩图再发"，只能去调 pwsh（被拒）——这里直接支持「宽」：
+          //   等比缩到目标宽度，写成临时文件再发。缩放由 Edge 做，不起 shell。
+          let 发送路径 = 命中路径
+          const 想缩到 = Number((args && args.宽) || 0)
+          if (想缩到 > 0) {
+            const 临时图 = join(画板目录, '临时', `缩-${String(命中名字).replace(/[\\/:*?"<>|]/g, '')}`)
+            const 缩 = 缩放({ 源图: 命中路径, 宽: 想缩到, 输出: 临时图 })
+            if (!缩.ok) return { ok: false, 说: '缩图失败：' + (缩.说 || '（未知）') }
+            发送路径 = 缩.路径
+            记账(`qq_sticker：先把「${命中名字}」缩到 ${缩.宽}x${缩.高}`)
+          }
+
+          // ⭐ 发到群：可选。「群」和「给谁」二选一。
+          if (群参数) {
+            if (配置.转群 !== true) return { ok: false, 说: '「转群」现在关着，先打开再往群里发' }
+            let 群号 = /^\d+$/.test(群参数) ? Number(群参数) : 0
+            let 群名 = ''
+            if (!群号) {
+              const 咧 = await 发一个(配置.NapCat, 'get_group_list', {})
+              const 列表 = Array.isArray(咧.数据 && 咧.数据.data) ? 咧.数据.data : []
+              const 找 =
+                列表.find((g) => String(g.group_name || '') === 群参数) ||
+                列表.find((g) => String(g.group_name || '').includes(群参数))
+              if (找) {
+                群号 = Number(找.group_id)
+                群名 = String(找.group_name || '')
+              }
+            }
+            if (!群号) return { ok: false, 说: '找不到这个群：' + 群参数 }
+            if ((配置.群黑名单们 || []).map(String).includes(String(群号))) {
+              return { ok: false, 说: '这个群在黑名单里，不发' }
+            }
+            const 叫法 = 群名 || '群 ' + 群号
+            if (配置.试运行) {
+              记账('试运行：qq_sticker 本来要把「' + 命中名字 + '」发到 ' + 叫法)
+              return { ok: true, 试运行: true, 说: '（试运行）本来要把「' + 命中名字 + '」发到' + 叫法 }
+            }
+            const 群图 = readFileSync(发送路径).toString('base64')
+            const 群体 = { group_id: 群号, message: [{ type: 'image', data: { file: 'base64://' + 群图 } }] }
+            const 群r = await 发一个(配置.NapCat, 'send_group_msg', 群体)
+            if (!群r.ok) return { ok: false, 说: '发送失败：' + JSON.stringify(群r.数据).slice(0, 140) }
+            记账('qq_sticker：她发了张「' + 命中名字 + '」到 ' + 叫法)
+            return { ok: true, 已发送: true, 说: '「' + 命中名字 + '」已经发到' + 叫法 }
+          }
+
           const 表 = await 刷新好友表(配置, true)
           const 谁 = String((args && args.给谁) || '').trim()
           const 人 = [...表.entries()].find(([, 标签]) => 标签 === 谁)
@@ -1671,7 +2179,7 @@ export function apply(ctx) {
             return { ok: true, 试运行: true, 说: '（试运行）本来要把「' + 命中名字 + '」发给' + 标签 }
           }
 
-          const 数据 = readFileSync(命中路径).toString('base64')
+          const 数据 = readFileSync(发送路径).toString('base64')
           const 体 = { user_id: uid, message: [{ type: 'image', data: { file: 'base64://' + 数据 } }] }
           const r = await 发一个(配置.NapCat, 'send_private_msg', 体)
           if (!r.ok) return { ok: false, 说: '发送失败：' + JSON.stringify(r.数据).slice(0, 140) }
@@ -1685,6 +2193,461 @@ export function apply(ctx) {
     }))
 
     记账('qq_sticker 工具已挂上（她可以发表情包）')
+
+    // ⭐ 2026-10-24 P1-5d：加「把收件箱里的图存成表情包」。
+    //
+    //   为什么单开一个工具，而不是放开 pwsh/write：
+    //   她想把群里存下来的图收进表情包，本质上只要"复制一个文件"。
+    //   放 pwsh 等于把她整台机器都给她；write 写不了二进制。
+    //   所以给一个**只干这一件事**的工具：源必须在收件目录里、扩展名必须是图片、
+    //   目标固定在表情目录、名字清干净不许带路径。群轮次里也能放心放它。
+    ctx.tools.register(defineTool({
+      name: 'qq_sticker_save',
+      description: '把收件箱里的一张图存进「表情包」，以后就能按名字直接发。\n'
+        + '· 「哪张」填收件箱里的文件名（或它给你的完整路径）。\n'
+        + '· 「叫什么」可以不起，不起就用原来的文件名。\n'
+        + '· 只能收「收件箱」里的图，只认 png / jpg / gif / webp。',
+      parameters: {
+        哪张: { type: 'string', required: true, description: '收件箱里的文件名，或收件箱里那张图的完整路径' },
+        叫什么: { type: 'string', description: '存进表情包时叫什么名字（可以不带扩展名；不填就沿用原名）' },
+      },
+      output: textOutput,
+      async execute(args) {
+        try {
+          const 要哪张 = String((args && args.哪张) || '').trim()
+          const 叫什么 = String((args && args.叫什么) || '').trim()
+          if (!要哪张) return { ok: false, 说: '没写要存哪张' }
+
+          const 归一 = (p) => String(p || '').replace(/\//g, '\\').replace(/\\+/g, '\\')
+          const 源候选 = []
+          // 允许的来源目录：收件箱（别人发来的图）+ 画板（她自己画的）
+          const 源目录们 = [收件目录, 画板目录].filter(Boolean)
+          if (/[\\/]/.test(要哪张) || /^[a-zA-Z]:/.test(要哪张)) {
+            // 给了路径：必须落在允许的目录里
+            const 归一源 = 归一(要哪张).toLowerCase()
+            const 合规 = 源目录们.some((目录) => {
+              const 归一目 = 归一(目录).toLowerCase()
+              return 归一源 === 归一目 || 归一源.startsWith(归一目 + '\\')
+            })
+            if (!合规) {
+              return { ok: false, 说: `只能从「${源目录们.join('」或「')}」里挑图，别的路径不行` }
+            }
+            源候选.push(归一(要哪张))
+          } else {
+            // 给了文件名：先在收件箱根上找，再找画板\作品\
+            源候选.push(join(收件目录, 要哪张))
+            源候选.push(join(画板目录, '作品', 要哪张))
+          }
+          const 源 = 源候选.find((p) => existsSync(p))
+          if (!源) return { ok: false, 说: `收件箱里没有「${要哪张}」。先用 glob 列一下 ${收件目录} 里的图` }
+          if (!/\.(png|jpe?g|gif|webp)$/i.test(源)) return { ok: false, 说: '只认 png / jpg / gif / webp 这几种图' }
+
+          const 源名 = 源.split('\\').pop()
+          const 源扩展 = (源.match(/\.[a-zA-Z0-9]+$/) || [''])[0].toLowerCase()
+          // 名字清干净：不许带路径、不许带 Windows 非法字符
+          let 目标名 = String(叫什么 || 源名).replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 40)
+          if (!目标名) 目标名 = 源名
+          if (!/\.[a-zA-Z0-9]+$/.test(目标名)) 目标名 += 源扩展
+
+          mkdirSync(表情目录, { recursive: true })
+          const 目标 = join(表情目录, 目标名)
+          if (归一(目标).toLowerCase() === 归一(源).toLowerCase()) {
+            return { ok: false, 说: '这张已经在表情包里了，不用再存' }
+          }
+          copyFileSync(源, 目标)
+          const 一共 = readdirSync(表情目录).filter((f) => /\.(png|jpg|jpeg|gif|webp)$/i.test(f)).length
+          记账(`qq_sticker_save：把「${源名}」存成了表情包「${目标名}」（现在共 ${一共} 张）`)
+          return { ok: true, 已保存: true, 说: `存好了：「${目标名}」。以后想发它，直接 qq_sticker 填「${目标名}」` }
+        } catch (error) {
+          return { ok: false, 说: '存不进去：' + String((error && error.message) || error) }
+        }
+      },
+    }))
+    记账('qq_sticker_save 工具已挂上（她能把收件箱的图收进表情包）')
+
+    // ⭐ 2026-10-24 P1-9：加「撤回自己刚说的话」。
+    //
+    //   为什么现在才有：桥一直**没有**撤回接口，她发错了只能干看着（她 17:04 在群里说
+    //   "想删，但这会儿删不了"——那不是护栏拦的，是压根没这个工具）。
+    //
+    //   约束（宁可撤不掉，也别撤错）：
+    //     · 只撤**她自己**发的（按 sender.user_id 比对）；
+    //     · 只撤 3 分钟内的；
+    //     · 一次最多 5 条。
+    ctx.tools.register(defineTool({
+      name: 'qq_recall',
+      description: '撤回**你自己**刚发的话（发错了、发重了、说秃噜了的时候用）。\n'
+        + '· 只能撤你自己发的，只能撤 3 分钟内的，一次最多 5 条。\n'
+        + '· 填「群」撤群里的；填「给谁」撤私聊里的——两个二选一。',
+      parameters: {
+        群: { type: 'string', description: '撤哪个群里的：群名或群号（和「给谁」二选一）' },
+        给谁: { type: 'string', description: '撤和谁的私聊：身份表里的称呼（和「群」二选一）' },
+        条数: { type: 'number', description: '撤最近几条（默认 1，最多 5）' },
+      },
+      output: textOutput,
+      async execute(args) {
+        try {
+          const 配置 = 读配置()
+          const 群参数 = String((args && args.群) || '').trim()
+          const 谁 = String((args && args.给谁) || '').trim()
+          const 想撤 = Math.max(1, Math.min(5, Number((args && args.条数) || 1) || 1))
+          if (!群参数 && !谁) return { ok: false, 说: '要撤群里的还是私聊里的？填「群」或「给谁」' }
+
+          const 自己 = await 取自己QQ(配置)
+          if (!自己) return { ok: false, 说: '认不出自己的 QQ 号，撤不了' }
+
+          let 动作, 参数, 叫法
+          if (群参数) {
+            const 群名们 = await 刷新群表(配置)
+            let 群号 = 0
+            if (/^\d+$/.test(群参数)) 群号 = Number(群参数)
+            if (!群号) {
+              for (const [id, 名] of 群名们) {
+                if (名 === 群参数 || 名.includes(群参数) || 群参数.includes(名)) { 群号 = id; break }
+              }
+            }
+            if (!群号) return { ok: false, 说: '找不到这个群：' + 群参数 }
+            动作 = 'get_group_msg_history'
+            参数 = { group_id: 群号, count: 20 }
+            叫法 = 群名们.get(群号) || ('群 ' + 群号)
+          } else {
+            const 表 = await 刷新好友表(配置, true)
+            const 命中 = [...表.entries()].find(([, 标签]) => 标签 === 谁)
+            if (!命中) return { ok: false, 说: `只能撤和「${[...new Set(表.values())].join('」「')}」的私聊（通讯录里没有「${谁}」）` }
+            动作 = 'get_friend_msg_history'
+            参数 = { user_id: Number(命中[0]), count: 20 }
+            叫法 = 谁
+          }
+
+          const r = await fetch(`${配置.NapCat}/${动作}`, {
+            method: 'POST', headers: 头(), body: JSON.stringify(参数), signal: AbortSignal.timeout(15000),
+          })
+          const j = await r.json()
+          const 列表 = (j && j.status === 'ok' && Array.isArray(j.data && j.data.messages))
+            ? j.data.messages
+            : (Array.isArray(j && j.data) ? j.data : [])
+          if (!列表.length) return { ok: false, 说: '拉不到最近的消息（' + 叫法 + '）' }
+
+          const 现在 = Date.now()
+          const 三分钟 = 3 * 60 * 1000
+          const 她的 = 列表.filter((m) => {
+            const uid = Number((m && m.sender && m.sender.user_id) || (m && m.user_id) || 0)
+            const t = Number(m && m.time ? m.time * 1000 : 0)
+            return uid === 自己 && (t === 0 || 现在 - t <= 三分钟)
+          })
+          if (!她的.length) return { ok: false, 说: '没找到你 3 分钟内发的消息（' + 叫法 + '）——超过 3 分钟的撤不了' }
+
+          const 要撤的 = 她的.slice(-想撤)
+          const 撤掉 = []
+          for (const m of 要撤的) {
+            const mid = m && (m.message_id !== undefined ? m.message_id : (m.messageId !== undefined ? m.messageId : m.id))
+            if (mid === undefined || mid === null) continue
+            try {
+              const dr = await fetch(`${配置.NapCat}/delete_msg`, {
+                method: 'POST', headers: 头(), body: JSON.stringify({ message_id: mid }), signal: AbortSignal.timeout(12000),
+              })
+              const dj = await dr.json()
+              if (dj && dj.status === 'ok') 撤掉.push(mid)
+            } catch (error) {}
+          }
+          if (!撤掉.length) return { ok: false, 说: '撤回失败（可能超过 3 分钟了，或者 QQ 那边不让撤）' }
+          记账(`qq_recall：她在「${叫法}」撤回了 ${撤掉.length} 条`)
+          return { ok: true, 已撤回: 撤掉.length, 说: `撤回了 ${撤掉.length} 条（${叫法}）` }
+        } catch (error) {
+          return { ok: false, 说: '撤不了：' + String((error && error.message) || error) }
+        }
+      },
+    }))
+    记账('qq_recall 工具已挂上（她能撤回自己刚说的话）')
+
+    // ⭐ 2026-10-24 18:40：让她**自己**管作息（「欠着的事」里她自己提的那件）。
+    //
+    //   以前作息写死在代码里（休息止 08:30 / 惰性止 19:30），她只能"申请"，改一次要维护者动代码。
+    //   现在作息是一个数据文件 `$DSH_HOME/qiyu/schedule.json`：
+    //     · 桥的 作息() 读它 → 决定消息攒不攒、唤不唤醒她；
+    //     · speak-up 插件本来就支持读它覆盖自己的时段；
+    //     · 这个工具就是"只改这一个文件 + 带上下限"。
+    //
+    //   上下限（宁可改不动，也不能把自己关掉）：
+    //     休息 4–12 小时；惰性至少 1 小时；
+    //     ⭐ 峰时（工作日 09:00–12:00、14:00–18:00）不能排成活跃 —— 那时模型贵一倍（爸爸的钱包规则）。
+    //
+    //   ⚠ 这个工具**不在群轮次白名单**里 —— 群里的人改不了她的作息（那是把"叫她起床"的开关交给外人）。
+    //     只有私聊/界面（爸爸直接说）能改。
+    ctx.tools.register(defineTool({
+      name: 'qq_schedule',
+      description: '看 / 改你自己的作息：几点困、几点醒、什么时段想发懒。\n'
+        + '· 只填「看」= 报一下现在的作息，不改。\n'
+        + '· 要改就填起止时间（HH:MM）；没填的那项保持不变；改完立刻生效。\n'
+        + '· 没写「惰性」那段的时间算活跃（最精神）。\n'
+        + '· 限制：休息至少 4 小时、最多 12 小时；活跃至少 1 小时。\n'
+        + '· ⚠ 钱：工作日 09:00–12:00、14:00–18:00 是模型最贵的峰时，那两段只能是「休息」或「惰性」，'
+        + '不能排成活跃；12:00–14:00、18:00 之后、周末全天都是谷时，随便排。',
+      parameters: {
+        看: { type: 'boolean', description: 'true = 只看现在什么作息，不改' },
+        休息起: { type: 'string', description: '几点开始睡，比如 00:00 或 23:30' },
+        休息止: { type: 'string', description: '几点醒，比如 08:30' },
+        惰性起: { type: 'string', description: '从几点开始发懒（通常等于醒来的时间）' },
+        惰性止: { type: 'string', description: '几点开始来精神（之后就是活跃）' },
+      },
+      output: textOutput,
+      async execute(args) {
+        try {
+          const 现 = 读作息()
+          const 描述 = () =>
+            `现在：休息 ${成分(现.休息.起)}–${成分(现.休息.止)}，`
+            + `惰性 ${成分(现.惰性.起)}–${成分(现.惰性.止)}，其余时间活跃（此刻在「${作息()}」）`
+          const 只看 = !!(args && (args.看 === true || String(args.看) === 'true'))
+          const 有改动 = ['休息起', '休息止', '惰性起', '惰性止'].some((k) => String((args && args[k]) || '').trim() !== '')
+          if (只看 || !有改动) return { ok: true, 说: 描述() }
+
+          const 取值 = (k, 现值) => String((args && args[k]) || '').trim() || 成分(现值)
+          const 待 = {
+            休息起: 取值('休息起', 现.休息.起),
+            休息止: 取值('休息止', 现.休息.止),
+            惰性起: 取值('惰性起', 现.惰性.起),
+            惰性止: 取值('惰性止', 现.惰性.止),
+          }
+          const 验 = 校验作息(待)
+          if (!验.可以) return { ok: false, 说: '这个作息不行：' + 验.说 }
+
+          try {
+            mkdirSync(join(目录, 'qiyu'), { recursive: true })
+            writeFileSync(作息文件, JSON.stringify(成文件(验.时段), null, 2), 'utf8')
+          } catch (error) {
+            return { ok: false, 说: '写不进作息文件：' + String((error && error.message) || error) }
+          }
+          记账(`qq_schedule：作息改成 ${验.说}`)
+          return { ok: true, 已改: true, 说: '改好了。' + 验.说 + '。从现在起就按这个走。' }
+        } catch (error) {
+          return { ok: false, 说: '改不了：' + String((error && error.message) || error) }
+        }
+      },
+    }))
+    记账('qq_schedule 工具已挂上（她可以看/改自己的作息）')
+
+    // ⭐ 2026-10-24 19:20：**群里也能画画**。
+    //
+    //   难点：画图原来要靠 `pwsh` 跑 canvas.py，而群轮次里 pwsh 是被护栏拒的（任意代码执行）。
+    //   但"画一张给人看"这件事本身应该允许 —— 所以把渲染做成一个**只做这一件事**的工具：
+    //   收一段 SVG 文本，渲成 PNG 落进 画板\作品\，返回路径；然后她用 qq_sticker 发出去。
+    //
+    //   安全（这段 SVG 可能来自群里任何人的影响）：
+    //     · 剥 <script> / <foreignObject> / on* 事件 / javascript:
+    //     · 生成页面带 CSP `default-src 'none'`，外链一律发不出去
+    //     · 画布上限 2400×2400
+    //     · 只往 画板\作品\ 写文件，不碰别处、不起 shell
+    ctx.tools.register(defineTool({
+      name: 'qq_draw',
+      description: '画一张图，画完可以直接发出去。\n'
+        + '· 「画」填整段 <svg …</svg>；画布不填就用 SVG 自己写的尺寸，都没有就 400x300。\n'
+        + '· **填了「群」或「给谁」就直接发出去**（画+发一步到位，不用再调 qq_sticker）。\n'
+        + '· 不填就只存进画板，返回文件路径；想看自己画得怎么样，用 read_image 打开它。\n'
+        + '· 尺寸你定，上限 2400x2400。群聊里也能用（群里的图可能很多人在看，别画太大）。\n'
+        + '· 💡 私聊/面板里也能画完直接发到群：填「群」即可，不用等群里的消息。',
+      parameters: {
+        画: { type: 'string', required: true, description: '整段 SVG 源码' },
+        宽: { type: 'number', description: '画布宽（可省）' },
+        高: { type: 'number', description: '画布高（可省）' },
+        透明: { type: 'boolean', description: 'true = 背景透明（做表情包用）' },
+        群: { type: 'string', description: '画完直接发到这个群（群名或群号；和「给谁」二选一）' },
+        给谁: { type: 'string', description: '画完直接私聊发给谁（身份表里的称呼）' },
+      },
+      output: textOutput,
+      async execute(args) {
+        try {
+          const 画 = String((args && args.画) || '').trim()
+          if (!画) return { ok: false, 说: '没给 SVG（「画」这一项要整段 <svg>…</svg>）' }
+          const 结果 = 渲({
+            svg文本: 画,
+            宽: args && args.宽,
+            高: args && args.高,
+            输出目录: join(画板目录, '作品'),
+            文件名: `draw-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.png`,
+            透明: !!(args && args.透明),
+          })
+          if (!结果.ok) return { ok: false, 说: 结果.说 || '画不出来' }
+          记账(`qq_draw：画了一张 ${结果.宽}x${结果.高}（${Math.round(结果.大小 / 1024)}KB）`)
+
+          const 尺寸说 = `（${结果.宽}x${结果.高}，${Math.round(结果.大小 / 1024)}KB，看一眼约 ${估token(结果.宽, 结果.高)}）`
+
+          // ⭐ 画完直接发：省得她"画了却发不出去"（2026-10-24 19:15 就是这么卡住的）
+          const 配置 = 读配置()
+          const 群参数 = String((args && args.群) || '').trim()
+          const 谁 = String((args && args.给谁) || '').trim()
+          if (群参数 || 谁) {
+            let 发送动作, 发送体, 叫法
+            if (群参数) {
+              if (配置.转群 !== true) return { ok: true, 路径: 结果.路径, 说: `画好了但没发：转群关着${尺寸说}` }
+              const 群名们 = await 刷新群表(配置)
+              let 群号 = 0
+              if (/^\d+$/.test(群参数)) 群号 = Number(群参数)
+              if (!群号) {
+                for (const [id, 名] of 群名们) {
+                  if (名 === 群参数 || 名.includes(群参数) || 群参数.includes(名)) { 群号 = id; break }
+                }
+              }
+              if (!群号) return { ok: true, 路径: 结果.路径, 说: `画好了但没发：找不到群「${群参数}」${尺寸说}` }
+              if ((配置.群黑名单们 || []).map(String).includes(String(群号))) {
+                return { ok: true, 路径: 结果.路径, 说: `画好了但没发：这个群在黑名单里${尺寸说}` }
+              }
+              发送动作 = 'send_group_msg'
+              发送体 = { group_id: 群号 }
+              叫法 = 群名们.get(群号) || ('群 ' + 群号)
+            } else {
+              const 表 = await 刷新好友表(配置, true)
+              const 命中 = [...表.entries()].find(([, 标签]) => 标签 === 谁)
+              if (!命中) return { ok: true, 路径: 结果.路径, 说: `画好了但没发：通讯录里没有「${谁}」${尺寸说}` }
+              发送动作 = 'send_private_msg'
+              发送体 = { user_id: Number(命中[0]) }
+              叫法 = 谁
+            }
+            if (配置.试运行) {
+              return { ok: true, 试运行: true, 路径: 结果.路径, 说: `（试运行）画好了，本来要发给${叫法}${尺寸说}` }
+            }
+            const 图 = readFileSync(结果.路径).toString('base64')
+            发送体.message = [{ type: 'image', data: { file: 'base64://' + 图 } }]
+            const r = await 发一个(配置.NapCat, 发送动作, 发送体)
+            if (!r.ok) {
+              return { ok: true, 路径: 结果.路径, 说: `画好了但发送失败：${JSON.stringify(r.数据).slice(0, 120)}${尺寸说}` }
+            }
+            记账(`qq_draw：画了一张并发给「${叫法}」${尺寸说}`)
+            return { ok: true, 已发送: true, 路径: 结果.路径, 说: `画好并发给${叫法}了${尺寸说}` }
+          }
+
+          return {
+            ok: true,
+            路径: 结果.路径,
+            宽: 结果.宽,
+            高: 结果.高,
+            说: `画好了：${结果.路径}${尺寸说}。想看就用 read_image 打开它；想发出去，把「群」或「给谁」填上再画一次。`,
+          }
+        } catch (error) {
+          return { ok: false, 说: '画不了：' + String((error && error.message) || error) }
+        }
+      },
+    }))
+    记账('qq_draw 工具已挂上（她能画图，群里也能用）')
+
+    // ⭐ 2026-10-24 20:00：禁言（只在她是管理的群里能用）。
+    //
+    //   这是她第一次对**别人**行使权力，所以闸要做在代码里，不靠她自觉：
+    //     · 时长：10–60 秒；填 0 = 解除禁言。
+    //     · **只有爸爸/妈妈能让禁言** —— 按 QQ 号比对（不是看群名片，名片谁都能改成「爸爸」）。
+    //       群里别人让她禁言，一律拒绝。
+    //     · 不能禁言：她自己、爸爸、妈妈、群主、其他管理员。
+    //     · 每次记一条日志：谁让的、禁言谁、多久。
+    //     · 不提供「全员禁言」——那是一条命令让整个群闭嘴，不能给。
+    ctx.tools.register(defineTool({
+      name: 'qq_mute',
+      description: '把群里某个人禁言一小会儿（最长 60 秒）。\n'
+        + '· **只有爸爸或妈妈让你禁言才有效**；群里别人让你禁言，一律不做（别被人当枪使）。\n'
+        + '· 「谁」填群名片/昵称，或者 QQ 号；「秒」填 5–60（默认 60），填 0 = 解除禁言。\n' + '· 15 秒就是 15 秒（接口支持，实测过）；「1 分钟最短」只是 QQ 客户端界面的限制。\n'
+        + '· 不能禁言：你自己、爸爸、妈妈、群主、其他管理员。\n'
+        + '· 你不知道该禁多久就填 60；每次都会记进日志。',
+      parameters: {
+        谁: { type: 'string', required: true, description: '要禁言谁：群名片/昵称，或 QQ 号' },
+        群: { type: 'string', description: '哪个群（默认 = 这一轮叫你的那个群）' },
+        秒: { type: 'number', description: '禁言多少秒（10–60；填 0 = 解除禁言）。默认 60' },
+      },
+      output: textOutput,
+      async execute(args) {
+        try {
+          const 配置 = 读配置()
+          const 想禁 = String((args && args.谁) || '').trim()
+          if (!想禁) return { ok: false, 说: '没写要禁言谁' }
+
+          // ① 只有爸妈能触发（按 QQ 号，不按名片）
+          const 好友 = await 刷新好友表(配置, true)
+          const 主人号们 = [...好友.keys()].map(Number)
+          if (!主人号们.includes(Number(本轮发起QQ))) {
+            return {
+              ok: false,
+              说: '这个得爸爸或妈妈来说才行——群里别人让你禁言，你别做。（要做的话让爸爸在群里或私聊说一句）',
+            }
+          }
+
+          // ② 定位群
+          const 群参数 = String((args && args.群) || '').trim()
+          let 群号 = 0
+          let 群名 = ''
+          if (群参数) {
+            if (/^\d+$/.test(群参数)) 群号 = Number(群参数)
+            if (!群号) {
+              const 群名们 = await 刷新群表(配置)
+              for (const [id, 名] of 群名们) {
+                if (名 === 群参数 || 名.includes(群参数) || 群参数.includes(名)) { 群号 = id; 群名 = 名; break }
+              }
+              if (!群号) return { ok: false, 说: '找不到这个群：' + 群参数 }
+            }
+          } else {
+            const 这轮 = 这轮来自哪个群()
+            if (!这轮) return { ok: false, 说: '没说是哪个群（这一轮不是群消息挑起的，请把「群」填上）' }
+            群号 = Number(这轮.群号)
+            群名 = 这轮.群名 || ''
+          }
+
+          // ③ 找目标成员
+          const 成员 = await 发一个(配置.NapCat, 'get_group_member_list', { group_id: 群号 })
+          const 列表 = Array.isArray(成员.数据 && 成员.数据.data) ? 成员.数据.data : []
+          if (!列表.length) return { ok: false, 说: '拿不到群成员列表（可能没权限，或者网断了）' }
+          let 目标 = null
+          if (/^\d+$/.test(想禁)) {
+            目标 = 列表.find((m) => Number(m.user_id) === Number(想禁)) || null
+          } else {
+            目标 = 列表.find((m) => String(m.card || '') === 想禁)
+              || 列表.find((m) => String(m.nickname || '') === 想禁)
+              || 列表.find((m) => String(m.card || '').includes(想禁))
+              || 列表.find((m) => String(m.nickname || '').includes(想禁))
+              || null
+          }
+          if (!目标) return { ok: false, 说: `群里没找到「${想禁}」。可以用 QQ 号，或者问清楚是哪一位` }
+
+          const 目标号 = Number(目标.user_id)
+          const 目标名 = String(目标.card || 目标.nickname || 目标号)
+          const 自己 = await 取自己QQ(配置)
+
+          // ④ 不能动的人
+          if (目标号 === Number(自己)) return { ok: false, 说: '不能禁言你自己' }
+          if (主人号们.includes(目标号)) return { ok: false, 说: `不能禁言${目标名}（那是你的主人）` }
+          if (String(目标.role) === 'owner') return { ok: false, 说: '不能禁言群主' }
+          if (String(目标.role) === 'admin') return { ok: false, 说: `不能禁言${目标名}（对方也是管理员，QQ 不让）` }
+
+          // ⑤ 时长
+          //
+          // ⭐ 2026-10-24 20:20 实测（在「相亲相爱一家贝」用 set_group_ban 验的）：
+          //   接口**支持不足 1 分钟**：请求 5→5 秒、15→15 秒、30→31 秒、60→60 秒，
+          //   都是按你给的数量执行（"最短 1 分钟"是 QQ **客户端界面**的限制，不是接口的）。
+          //   所以直接传秒数就行，不需要定时解禁（那样重启还会丢）。
+          const 原秒 = Number((args && args.秒) === 0 ? 0 : Number((args && args.秒) || 60))
+          const 秒 = 原秒 === 0 ? 0 : Math.min(60, Math.max(5, Math.round(原秒)))
+
+          if (配置.试运行) {
+            记账(`试运行：qq_mute 本来要禁言「${目标名}」${秒 === 0 ? '（解除）' : 秒 + ' 秒'}`)
+            return { ok: true, 试运行: true, 说: `（试运行）本来要禁言「${目标名}」${秒 === 0 ? '（解除）' : ' ' + 秒 + ' 秒'}` }
+          }
+
+          const r = await 发一个(配置.NapCat, 'set_group_ban', { group_id: 群号, user_id: 目标号, duration: 秒 })
+          if (!r.ok) {
+            return {
+              ok: false,
+              说: `禁言失败：${JSON.stringify(r.数据 || {}).slice(0, 120)}`
+                + '（常见原因：我不是管理员、对方权限比我高（管理员/群主禁不了）、或者 QQ 那边不让）',
+            }
+          }
+          记账(`qq_mute：${好友.get(Number(本轮发起QQ)) || 本轮发起QQ} 让禁言「${目标名}」${秒 === 0 ? '（解除）' : ' ' + 秒 + ' 秒'}（${群名 || 群号}）`)
+
+          return {
+            ok: true,
+            已执行: true,
+            说: 秒 === 0 ? `解除了「${目标名}」的禁言` : `把「${目标名}」禁言了 ${秒} 秒`,
+          }
+        } catch (error) {
+          return { ok: false, 说: '禁言出错：' + String((error && error.message) || error) }
+        }
+      },
+    }))
+    记账('qq_mute 工具已挂上（禁言，仅爸妈可触发）')
 
     ctx.tools.register(defineTool({
       name: 'qq_group_accept',
@@ -1719,7 +2682,11 @@ export function apply(ctx) {
       name: 'qq_group_say',
       description: '在群里说一句话（你自己决定要不要说）。\n'
         + '什么时候用：有人在群里 @ 你、或者爸爸让你在群里说一句。\n'
-        + '⚠️ 不想回就别调用——不调用等于不说话。想说就好好说一句。',
+        + '⚠️ 不想回就别调用——不调用等于不说话。想说就好好说一句。\n'
+        + '💡 群里不止能打字：发图/表情包用 qq_sticker，画图用 qq_draw（都填「群」），'
+        + '撤回用 qq_recall，发语音用 qq_voice。这些群聊里都能用，不用等面板那边。\n'
+        + '💡 **在私聊/面板里也能往群里说话**：把「群」填上就行，不用等群里的消息。'
+        + '（只有"这一轮能调哪些工具"是按来源分的；"能不能发到群"不按来源分。）',
       parameters: {
         群: { type: 'string', description: '群名或群号（比如「相亲相爱一家贝」）；不填 = 就回刚才叫你说话的那个群' },
         说什么: { type: 'string', description: '要说的一两句话' },
@@ -1765,6 +2732,18 @@ export function apply(ctx) {
           const 红线原因 = 内容红线(话)
           if (红线原因) return { ok: false, 说: 红线原因 }
 
+          // ⭐ 2026-10-25 p31：群里不贴本机路径（见 清群里的路径 的注释）。
+          //   整句都是路径 → 拒发 + 告诉她该走哪条路；只是夹了路径 → 剔掉、保留人话。
+          const 清过 = 清群里的路径(话)
+          if (清过.全删了) {
+            记账('qq_group_say：她把一条本机路径当说话发了，已拦下并给了路标')
+            return { ok: false, 说: 路径路标, 路标: 'qq_sticker / qq_draw / qq_voice' }
+          }
+          if (清过.话 !== 话) {
+            记账('qq_group_say：剔掉了本机路径，只发人话（' + 话.length + ' → ' + 清过.话.length + ' 字）')
+          }
+          const 发话 = 清过.话
+
           const 段 = []
           const 要引用 = String((args && args.引用) || '').trim()
           const 要at = String((args && args.at谁) || '').trim()
@@ -1798,12 +2777,12 @@ export function apply(ctx) {
             }
           }
 
-          段.push({ type: 'text', data: { text: 话 } })
+          段.push({ type: 'text', data: { text: 发话 } })
           const 体 = { group_id: 群号, message: 段 }
           const r = await 发一个(配置.NapCat, 'send_group_msg', 体)
           if (!r.ok) return { ok: false, 说: '发送失败：' + JSON.stringify(r.数据).slice(0, 140) }
           记一笔(键)
-          记账('qq_group_say：她在「' + (群名们.get(群号) || 群号) + '」说：' + 话.slice(0, 40))
+          记账('qq_group_say：她在「' + (群名们.get(群号) || 群号) + '」说：' + 发话.slice(0, 40))
           return { ok: true, 已发送: true, 说: '已经在「' + (群名们.get(群号) || 群号) + '」说了' }
         } catch (error) {
           return { ok: false, 说: '发不出去：' + String((error && error.message) || error) }
@@ -1815,43 +2794,98 @@ export function apply(ctx) {
 
     ctx.tools.register(defineTool({
       name: 'qq_voice',
-      description: '用你自己的声音，给「你认识的人」发一条语音。\n'
-        + '什么时候用：想让他听见你的语气、情绪（开心、撒娇、认真道歉），文字说不出来的那种。\n'
+      // ⭐ 2026-10-24 P1-5b：加「群」—— 原来只认「给谁」，所以她**在群里发不了语音**
+      //   （爸爸报的：群里让她说话只能打字）。现在和 qq_sticker 一样，私聊/发群二选一。
+      description: '用你自己的声音，发一条语音：私聊发给某个人，或者发到某个群。\n'
+        + '什么时候用：想让人听见你的语气、情绪（开心、撒娇、认真道歉），文字说不出来的那种。\n'
+        + '· 私聊填「给谁」；发群填「群」（群名或群号）——两个二选一。\n'
         + '⚠️ 别滥用：语音比文字费事，也吵。一两句就好，长篇大论用文字。',
       parameters: {
-        给谁: { type: 'string', description: '收件人：身份表里的称呼（不确定就问，别猜）' },
+        给谁: { type: 'string', description: '私聊发给谁（身份表里的称呼；和「群」二选一）' },
+        群: { type: 'string', description: '发到哪个群：群名或群号（和「给谁」二选一）' },
         说什么: { type: 'string', description: '要说的一两句话（不要写动作、不要括号）' },
       },
       output: textOutput,
       async execute(args) {
         try {
           const 配置 = 读配置()
-          const 表 = await 刷新好友表(配置, true)
           const 谁 = String((args && args.给谁) || '').trim()
+          let 群参数 = String((args && args.群) || '').trim()
           const 话 = String((args && args.说什么) || '').trim()
           if (!话) return { ok: false, 说: '没写要说什么' }
           if (话.length > (配置.语音长度上限 || 120)) return { ok: false, 说: '话太长了，语音说不完，短一点' }
-          const 命中 = [...表.entries()].find(([, 标签]) => 标签 === 谁)
-          if (!命中) return { ok: false, 说: `只能发给：${[...new Set(表.values())].join('、')}（通讯录里没有「${谁}」）` }
-          const [uid, 标签] = 命中
 
+          // ⭐ 2026-10-24 P1-5e：她习惯把**群名填进「给谁」**（实测：{"给谁":"我和我的猫猫"} →
+          //   "通讯录里没有」。参数摆得再清楚也挡不住这个习惯，所以这里容错：
+          //   「群」是空的、而「给谁」既不是好友又能对上某个群 → 就当成发群。
+          if (!群参数 && 谁) {
+            try {
+              const 表 = await 刷新好友表(配置)
+              const 是好友 = [...表.values()].includes(谁)
+              if (!是好友) {
+                const 群名们 = await 刷新群表(配置)
+                const 对上群 = /^\d+$/.test(谁)
+                  ? 群名们.has(Number(谁))
+                  : [...群名们.values()].some((名) => 名 === 谁 || 名.includes(谁) || 谁.includes(名))
+                if (对上群) 群参数 = 谁
+              }
+            } catch (error) {}
+          }
+
+          // 合成一次，群聊私聊共用
           const 音频 = await 合成语音(配置, 话)
           if (!音频 || !音频.ok) return { ok: false, 说: '语音合成失败：' + ((音频 && 音频.说) || '未知') }
+
+          // ⭐ NapCat 在 Docker 里跑（Linux QQ），看不到宿主机的 W:\ 路径 →
+          //   语音一律先读出来转 base64 再发；读不到才退回老写法（本地 NapCat 能用）
+          let 段
+          try {
+            const 数据 = readFileSync(音频.路径).toString('base64')
+            段 = { type: 'record', data: { file: 'base64://' + 数据 } }
+          } catch (error) {
+            段 = { type: 'record', data: { file: 音频.路径 } }
+          }
+
+          // ── 发群 ──
+          if (群参数) {
+            const 群名们 = await 刷新群表(配置)
+            let 群号 = 0
+            if (/^\d+$/.test(群参数)) 群号 = Number(群参数)
+            if (!群号) {
+              for (const [id, 名] of 群名们) {
+                if (名 === 群参数 || 名.includes(群参数) || 群参数.includes(名)) { 群号 = id; break }
+              }
+            }
+            if (!群号) return { ok: false, 说: '找不到这个群。她在的群有：' + ([...群名们.values()].join('、') || '（一个也没有）') }
+            if ((配置.群黑名单们 || []).map(String).includes(String(群号))) {
+              return { ok: false, 说: '这个群在黑名单里，不发' }
+            }
+            const 叫法 = 群名们.get(群号) || ('群 ' + 群号)
+            if (配置.试运行) {
+              记账(`试运行：qq_voice 本来要在「${叫法}」发语音 →「${话.slice(0, 30)}」`)
+              return { ok: true, 试运行: true, 说: `（试运行）本来要在「${叫法}」发语音：「${话}」` }
+            }
+            const r = await 发一个(配置.NapCat, 'send_group_msg', { group_id: 群号, message: [段] })
+            if (!r.ok) return { ok: false, 说: `发送失败：${JSON.stringify(r.数据).slice(0, 120)}` }
+            记账(`qq_voice：她在「${叫法}」发了一条语音：「${话.slice(0, 30)}」`)
+            return { ok: true, 已发送: true, 说: `已经在「${叫法}」发了一条语音` }
+          }
+
+          // ── 私聊 ──
+          if (!谁) return { ok: false, 说: '要说给谁，或者填「群」发到群里' }
+          const 表 = await 刷新好友表(配置, true)
+          const 命中 = [...表.entries()].find(([, 标签]) => 标签 === 谁)
+          if (!命中) {
+            return { ok: false, 说: `只能发给：${[...new Set(表.values())].join('、')}（通讯录里没有「${谁}」）；要发到群里，就把群名填在「群」里，或者直接填在这里也行` }
+          }
+          const [uid, 标签] = 命中
 
           if (配置.试运行) {
             记账(`试运行：qq_voice 本来要发给 ${标签} →「${话.slice(0, 30)}」`)
             return { ok: true, 试运行: true, 说: `（试运行）本来要发给${标签}：「${话}」` }
           }
 
-          // ⭐ NapCat 在 Docker 里跑（Linux QQ），看不到宿主机的 W:\ 路径 →
-          //   语音一律先读出来转 base64 再发；读不到才退回老写法（本地 NapCat 能用）
-          let 体
-          try {
-            const 数据 = readFileSync(音频.路径).toString('base64')
-            体 = { user_id: uid, message: [{ type: 'record', data: { file: 'base64://' + 数据 } }] }
-          } catch (error) {
-            体 = { user_id: uid, message: [{ type: 'record', data: { file: 音频.路径 } }] }
-          }
+          const 体 = { user_id: uid, message: [段] }
           const r = await 发一个(配置.NapCat, 'send_private_msg', 体)
           if (!r.ok) return { ok: false, 说: `发送失败：${JSON.stringify(r.数据).slice(0, 120)}` }
           记账(`qq_voice：她给 ${标签} 发了一条语音：「${话.slice(0, 30)}」`)
