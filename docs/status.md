@@ -4,9 +4,9 @@
 
 ## 一句话状态
 
-**仓库追上了生产：桥 p35 已同步进来，0.15.9 待发。**
+**0.15.9 已发（npm + GitHub）：桥 p35、护栏、六套单测都在仓库里了。**
 
-- npm：`dsh-qiyu-stack@0.15.8`（`latest`；**0.15.9 还没发**）
+- npm：`dsh-qiyu-stack@0.15.9`（`latest`，2026-10-25 发布）
 - GitHub：<https://github.com/aesfls/dsh-qiyu-stack>（公开，main）
 - 真机实例（作者本人那台）：桥 **p35** 在跑，`qiyu doctor` 0 fail
 
@@ -38,10 +38,11 @@
 
 ### 这次没做的
 
-- **npm 还没发**：0.15.9 只在本地仓库（发版要单独点头）。
 - 真机上跑的护栏还是 0.2.1（仓库这份是 0.3.0：默认值去私人化）。真机要升级得走那台机器的维护会话 ——
   `doctor` 会因此一直提示 `guard/lib/*` 两边不一样，这是**预期内**的，别用 `--force` 硬同步。
 - `doctor` 的模板体检只扫 `templates/`，`runtime/` 里再冒出私人值它看不见（这次就是这么漏进 0.15.8 的）。
+- GitHub 推送要关 TLS 校验：这台机器上 `github.com` 的证书链验不过（`UNABLE_TO_VERIFY_LEAF_SIGNATURE`），
+  npm registry 正常。临时用 `git -c http.sslVerify=false push`，**别写进配置**。
 
 ## 发版规矩（以后照做）
 
