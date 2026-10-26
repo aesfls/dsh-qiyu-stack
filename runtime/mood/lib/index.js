@@ -147,11 +147,25 @@ function 读角色() {
   }
 }
 
+/**
+ * ⭐ 2026-10-26：心情的「目标会话」没填时，回落到**桥的目标会话**。
+ *   起因：干净机器上桥和会话都对了，心情却还挂在上一轮部署的旧会话上（或空着不挂），
+ *   doctor 0 fail 但心情永远不涨。同一台机器上「她的会话」只有一个，没必要让人选两遍。
+ */
+function 桥的目标会话() {
+  try {
+    const j = JSON.parse(readFileSync(join(CFG_DIR, "qq-bridge-config.json"), "utf8").replace(/^\uFEFF/, ""))
+    return String((j && j.目标会话) || "").trim()
+  } catch (error) {
+    return ""
+  }
+}
+
 function loadConfig() {
   try {
     const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))
     return {
-      targetSession: String(raw.targetSession || DEFAULT_SESSION).trim() || DEFAULT_SESSION,
+      targetSession: String(raw.targetSession || 桥的目标会话() || DEFAULT_SESSION).trim() || DEFAULT_SESSION,
       selfName: String((读角色() || {}).名字 || raw.selfName || DEFAULTS.selfName).trim().slice(0, 16) || DEFAULTS.selfName,
       ownerName: String(((读角色() || {}).称呼 || {}).主人 || raw.ownerName || DEFAULTS.ownerName).trim().slice(0, 16) || DEFAULTS.ownerName,
       selfAliases: String(raw.selfAliases || '').trim().slice(0, 60),

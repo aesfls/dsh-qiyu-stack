@@ -257,9 +257,16 @@ export async function deploy(选项 = {}) {
   console.log('')
 
   // ---------- 2. 端口 ----------
+  // ⭐ 2026-10-26：先看**同名容器**在不在跑。在跑的话，3000/3001/6099 就是它自己占的，
+  //   不是「别人占了」。以前无条件查端口 → 引擎一启动容器被 restart 策略拉起 →
+  //   deploy 必然在端口检查处退出（实测踩过，用户会以为是别的软件占用）。
+  const 自家状态 = 跑("docker", ["ps", "-a", "--filter", `name=^${容器名}$`, "--format", "{{.State}}"])
+  const 自家在跑 = 自家状态.ok && String(自家状态.出 || "").trim() === "running"
+  if (自家在跑) console.log(灰(`· 容器 ${容器名} 已经在跑 —— 端口是它自己的，跳过占用检查`))
   let 端口有冲突 = false
   for (const [叫法, 端口] of [['OneBot HTTP', 3000], ['OneBot WS', 3001], ['WebUI', 6099]]) {
     if (await 端口通(端口)) {
+      if (自家在跑) continue // 自己占的，正常
       端口有冲突 = true
       if (干跑) {
         console.log(黄(`· 端口 ${端口}（${叫法}）已被占着 —— 真跑的话这里会停`))
@@ -346,8 +353,28 @@ export async function deploy(选项 = {}) {
 
   // ---------- 4. 容器 ----------
   const 已有 = 跑('docker', ['ps', '-a', '--filter', `name=^${容器名}$`, '--format', '{{.State}}'])
-  if (已有.ok && 已有.出) {
-    console.log(黄('·') + ` 容器已存在（状态 ${已有.出}），直接启动`)
+  if (已有.ok && 已有.出 && !选项.已重建) {
+    // ⭐ 2026-10-26：ACCOUNT 是创建时的环境变量，docker start 不会改它 —— 换号只改 --qq 会继续登旧号
+    let 容器号 = ""
+    try {
+      const 看 = 跑("docker", ["inspect", 容器名, "--format", "{{range .Config.Env}}{{println .}}{{end}}"], 20000)
+      const 行 = String(看.出 || "").split(/\r?\n/).find((x) => x.startsWith("ACCOUNT="))
+      if (行) 容器号 = 行.slice("ACCOUNT=".length).trim()
+    } catch (error) {}
+    if (QQ号 && 容器号 && String(QQ号) !== 容器号) {
+      if (!选项.重建) {
+        console.log(红(`✗ 容器里登的是 ${容器号}，这次给的 --qq 是 ${QQ号}`))
+        console.log(黄("  换号不能只改参数：ACCOUNT 是容器创建时定的，docker start 不会改它。"))
+        console.log(灰(`  还没登录的话直接重建，不会丢登录态：docker rm -f ${容器名}，或加 --rebuild`))
+        return 1
+      }
+      console.log(黄(`· --rebuild：删掉旧容器（数据目录不动）`))
+      跑("docker", ["rm", "-f", 容器名], 60000)
+      console.log(灰("  已删除，下面会按新号重新创建"))
+      // 删完让后面的「创建」分支接手：用一个标志跳过 start
+      选项.已重建 = true
+    }
+    if (!选项.已重建) console.log(黄('·') + ` 容器已存在（状态 ${已有.出}），直接启动`)
     if (!干跑) {
       if (已有.出 !== 'running') 跑('docker', ['start', 容器名], 60000)
     }
@@ -418,6 +445,26 @@ export async function deploy(选项 = {}) {
     console.log(绿('✓') + ' 值写进 qiyu.config.json（doctor 会用这些）')
   } catch (错) {
     console.log(黄('·') + ' 写 qiyu.config.json 失败（不影响使用）：' + String(错.message || 错))
+  }
+
+  // ---------- 5.5 #11：把 --qq 写回角色包（以前只写容器和 OneBot 配置，角色资料里还是旧号） ----------
+  if (QQ号 && !干跑) {
+    try {
+      const 角色名 = 找角色名(读配置())
+      const 角色目录 = 角色名 ? join(process.cwd(), "characters", 角色名) : ""
+      const 角色文件 = 角色目录 ? join(角色目录, "character.json") : ""
+      if (角色文件 && existsSync(角色文件)) {
+        const j = JSON.parse(readFileSync(角色文件, "utf8").replace(/^\uFEFF/, ""))
+        if (Number(j.qq) !== Number(QQ号)) {
+          j.qq = Number(QQ号)
+          writeFileSync(角色文件, JSON.stringify(j, null, 2) + "\n", "utf8")
+          console.log(绿("✓") + ` 角色包的 qq 改成 ${QQ号}（${角色名}）`)
+          console.log(灰("  记得再跑一次 install --character " + 角色名 + "，把副本也同步过去"))
+        }
+      }
+    } catch (错) {
+      console.log(黄("·") + " 回写角色包的 qq 失败（不影响容器）：" + String(错.message || 错))
+    }
   }
 
   // ---------- 6. 等 WebUI 起来 ----------

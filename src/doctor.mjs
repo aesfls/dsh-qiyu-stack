@@ -292,6 +292,26 @@ export async function doctor({ 只输出JSON = false, 跳过WebSocket = false } 
           }
         } catch (error) {}
 
+        // ⭐ 画板（qq_draw）：随桥装上，但「能不能画」取决于本机有没有 Edge/Chrome
+        //   （SVG 渲成 PNG 靠无头浏览器）。没有浏览器时 qq_draw 会报「找不到 Edge/Chrome」。
+        try {
+          const 浏览器 = [
+            'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+            'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+            'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+          ].find((p) => existsSync(p))
+          if (浏览器) {
+            记('ok', '画板：能找到浏览器（qq_draw 可用）')
+          } else {
+            记(
+              'warn',
+              '画板：这台机器上找不到 Edge / Chrome',
+              'qq_draw 靠无头浏览器把 SVG 渲成 PNG；没有浏览器就画不出来（不影响文字收发）',
+              '装 Edge 或 Chrome 即可（Windows 一般自带 Edge）；装完重跑 doctor',
+            )
+          }
+        } catch (error) {}
+
         // ⭐ 身份：桥只认「好友备注以身份表前缀开头」的人；对不上的消息会被静默丢掉。
         const 身份表 = Array.isArray(j.配置.身份表) ? j.配置.身份表.filter((r) => r && r.备注前缀) : []
         const 好友表 = Array.isArray(j.好友表) ? j.好友表 : []

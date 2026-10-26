@@ -9,6 +9,7 @@ import { 读配置 } from './config.mjs'
 import { 跑 } from './run.mjs'
 
 const 绿 = (s) => `\x1b[32m${s}\x1b[0m`
+const 黄 = (s) => `\x1b[33m${s}\x1b[0m`
 const 灰 = (s) => `\x1b[90m${s}\x1b[0m`
 
 export function 打开文件(路径) {
@@ -69,8 +70,32 @@ export async function qr() {
     年龄秒 = Math.max(0, Math.round((Date.now() - statSync(目标).mtimeMs) / 1000))
   } catch {}
 
+  // ⭐ 2026-10-26：过期的码重跑 qr 只会拿到**同一张旧图**（NapCat 不会因为读文件就刷新）。
+  //   超过约 110 秒就重启一次容器，等新码出来再取 —— 还没登录，重启不会丢登录态。
+  let 刷新过 = false
+  if (年龄秒 > 110) {
+    console.log(黄(`这张码已经 ${年龄秒} 秒了，大概过期了 —— 重启容器要一张新的…`))
+    const 重启 = 跑("docker", ["restart", 配置.napcat.container], 90000)
+    if (重启.ok) {
+      刷新过 = true
+      for (let i = 0; i < 12; i++) {
+        await new Promise((r) => setTimeout(r, 1500))
+        const 再 = 跑("docker", ["cp", `${配置.napcat.container}:/app/napcat/cache/qrcode.png`, 目标], 15000)
+        if (!再.ok) continue
+        try {
+          年龄秒 = Math.max(0, Math.round((Date.now() - statSync(目标).mtimeMs) / 1000))
+        } catch {
+          年龄秒 = 0
+        }
+        if (年龄秒 <= 25) break
+      }
+    } else {
+      console.log(灰("  重启容器没成功，下面这张可能已经过期；也可以直接开 WebUI 看实时码：" + 配置.napcat.webui))
+    }
+  }
+
   console.log('')
-  console.log('接着会弹出一张二维码图片（图片窗口，不是网页，不用输入任何东西）。')
+  console.log(刷新过 ? "刚重新取了一张（容器重启过）。接着会弹出二维码。" : "接着会弹出一张二维码图片（图片窗口，不是网页，不用输入任何东西）。")
   {
     const 名 = String((读配置() || {}).角色 || '').trim()
     if (名) {

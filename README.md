@@ -136,13 +136,15 @@ npx dsh-qiyu-stack speed        # 只看速：语音模型源 + pip 源各多快
 | 装完她不回消息 | **目标会话没选** / 总开关没开 | doctor 里这两项会是 fail/warn，按它说的改 |
 | QQ 里发消息没反应 | 好友备注跟身份表前缀对不上 | 把对方备注改成 `称呼.主人`；或设置里加一条身份表 |
 | `docker pull` 卡住 / 超时 | 国内拉不动 Docker Hub | `deploy --image <加速站前缀>/mlikiowa/napcat-docker:latest`，或在 Docker Engine 设置里加 `registry-mirrors` |
-| 重启后又要扫码 | 登录态没保存 | `qiyu qr` 重扫；手机确认页勾上「下次登录无需确认」 |
+| 重启后又要扫码 | 登录态没保存 | `qiyu qr` 重扫（码超过 2 分钟会自动重启容器取新的）；手机确认页勾上「下次登录无需确认」 |
+| 换号后容器还登旧号 | `ACCOUNT` 是容器创建时定的 | `deploy --qq <新号> --rebuild`（数据目录不动，没登录就不丢登录态） |
 | 收到语音只回「没听清（模型缺失）」 | 语音转写没装 | `npx dsh-qiyu-stack stt` |
 | 刷 B 站报「子代理没跑完」 | 子代理 provider 指错了 | 设置 → 栖语 → 刷B站，把 provider/model 留空（= 用 DSH 当前默认） |
 | 群里让她发语音 / 画画被拒 | 护栏白名单 | 设置里看群里能做什么；要加就把工具名加进白名单（热生效） |
 | 写自己的文件弹 `danger-full-access` 审批 | Windows ACL 缺写权限 | 见 [docs/deployment.md](docs/deployment.md) 第七节第 2 条，**别**直接提权 |
 | doctor 说「运行时代码两边不一样」 | 你本地改过插件 | 先看方向，别 `--force`（会把新补丁盖成旧的） |
-| 心情永远不涨 | 心情的目标会话还是旧的/空的 | doctor 现在会直接报「挂到了别的会话」 |
+| 心情永远不涨 | 心情的目标会话还是旧的/空的 | doctor 会直接报；新装时它自动跟随桥的「目标会话」 |
+| `qq_draw` 报「找不到 Edge/Chrome」 | 机器上没有无头浏览器 | 装 Edge 或 Chrome；`doctor` 现在会提前告诉你能不能画 |
 
 ---
 

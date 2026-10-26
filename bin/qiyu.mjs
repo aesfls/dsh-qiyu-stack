@@ -57,6 +57,7 @@ const 帮助 = `
        --qq <号>                她的 QQ 号（给了就开快速登录，重启容器免扫码）
        --name <容器名>          默认 napcat-qq
        --token/--ws-token/--webui-token   自己指定令牌（不给就随机生成）
+       --rebuild                换号时删掉旧容器重建（ACCOUNT 是创建时定的，docker start 不会改）
        --dry-run                只把 docker 命令打出来，不动手
 
   qiyu doctor                   自检：Docker / 容器 / 端口 / OneBot / 桥
@@ -150,6 +151,7 @@ async function 主() {
       ws令牌: 取值('--ws-token'),
       webui令牌: 取值('--webui-token'),
       搬: 有开关('--move'),
+      重建: 有开关('--rebuild'),
       干跑: 有开关('--dry-run'),
     })
   }

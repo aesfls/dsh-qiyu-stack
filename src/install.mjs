@@ -395,10 +395,13 @@ export async function install(选项 = {}) {
           if (!existsSync(s2)) continue
           copyFileSync(s2, join(qiyu家, f))
         }
-        // 表情包 / 收件箱目录也指到角色包里，别在别处再长一份
+        // 表情包 / 收件箱 / 画板 目录也指到角色包里，别在别处再长一份
+        // ⭐ 2026-10-26：画板原先落在 ~/.dsh/qiyu/画板（运行时目录）—— 清 qiyu 时画作一起没，
+        //   而且不随角色包备份。现在跟表情包/收件箱一样映射进 characters/<名字>/。
         for (const [子, 源目录] of [
           ['表情包', join(角色源, 'stickers')],
           ['收件箱', join(角色源, 'inbox')],
+          ['画板', join(角色源, '画板')],
         ]) {
           if (!existsSync(源目录)) continue
           const 目标 = join(qiyu家, 子)

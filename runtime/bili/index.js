@@ -1394,7 +1394,16 @@ export function apply(ctx, config) {
         if (!existsSync(venvPy)) {
           // ⭐ 2026-10-17（issue #8③）：ASR 那个环境带了 --seed，主环境却漏了 ⇒ uv 建的 venv 默认不含 pip，
           //    一旦镜像失败、回退 `python -m pip` 就是 `No module named pip` ⇒ 连补救的路都没有 ✗
-          if (uvCmd) await spawnLogged(uvCmd, ['venv', '--seed', join(stateDir, '.venv')])
+          // ⭐ 2026-10-26：优先让 uv 拉一个 CPython **3.12** 来建 venv。
+          //   起因：系统 Python 若是 3.15，pyyaml 这类包没有 cp315 预编译轮子，
+          //   只能源码编译（要 MSVC）⇒ 实测四个 pip 镜像依次失败在 Failed building wheel for pyyaml。
+          if (uvCmd) {
+            const 用312 = await spawnLogged(uvCmd, ['venv', '--python', '3.12', '--seed', join(stateDir, '.venv')])
+            if (用312 !== 0 && !existsSync(venvPy)) {
+              appendInstall('用 3.12 建 venv 没成功（可能拉不到解释器），退回本机 Python —— 如果它太新，装依赖会卡在编译\n')
+              await spawnLogged(uvCmd, ['venv', '--seed', join(stateDir, '.venv')])
+            }
+          }
           if (!existsSync(venvPy) && !uvCmd) await spawnLogged(py, ['-m', 'venv', join(stateDir, '.venv')])
         }
         let code = 1
