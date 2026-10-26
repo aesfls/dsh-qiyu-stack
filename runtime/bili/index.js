@@ -1341,6 +1341,38 @@ export function apply(ctx, config) {
     c.on('error', (e) => { sink(`起不来：${e?.message ?? e}\n`); resolve(1) })
   })
 
+  /**
+   * ⭐ 2026-10-26：装依赖前先测速，按真实速度排 pip 源。
+   *   起因：默认写死清华源 —— 但清华对部分 IP 回 403，而阿里云/中科大在某些网络下更快；
+   *   写死顺序等于让一部分用户每次都慢一遍。
+   *   做法：每个源只取 128KB（最多 4 秒），按 KB/s 排；测不通的排最后（仍然会试）。
+   */
+  const rankMirrors = async (list) => {
+    const 探 = async (u) => {
+      const t0 = Date.now()
+      try {
+        const r = await fetch(u.replace(/\/$/, "") + "/sherpa-onnx/", {
+          signal: AbortSignal.timeout(4000),
+          headers: { Range: "bytes=0-131071", "User-Agent": "qiyu-speed/1" },
+        })
+        if (!r.ok && r.status !== 206) return { u, kb: 0 }
+        let n = 0
+        if (r.body) {
+          for await (const c of r.body) {
+            n += c.length
+            if (n >= 128 * 1024) break
+          }
+        }
+        return { u, kb: n / 1024 / Math.max(0.2, (Date.now() - t0) / 1000) }
+      } catch {
+        return { u, kb: 0 }
+      }
+    }
+    const rs = await Promise.all(list.map(探))
+    const 通 = rs.filter((x) => x.kb > 0).sort((a, b) => b.kb - a.kb).map((x) => x.u)
+    const 不通 = rs.filter((x) => x.kb === 0).map((x) => x.u)
+    return [...通, ...不通]
+  }
   /** 装主依赖：建 venv + bilibili_api 那套（搜索 / 字幕 / 评论 用得到） */
   const runInstall = () => {
     if (installing) return { ok: true, busy: true, log: installLogFile, hint: '正在装，别重复起' }
@@ -1368,7 +1400,9 @@ export function apply(ctx, config) {
         let code = 1
         // ⭐ 2026-10-17（issue #8②）：镜像也会整站拒绝（清华对部分 IP 回 403，而 pip 的报错写成"这个包不存在"，很误导）
         //    ⇒ 一个镜像失败就换下一个，别让用户在一个死镜像上反复撞
-        const mirrors = [mirror, 'https://mirrors.ustc.edu.cn/pypi/simple', 'https://mirrors.aliyun.com/pypi/simple']
+        // ⭐ 先测速再排（写死顺序会让一部分人一直用慢的那个）
+        const mirrors = await rankMirrors([mirror, "https://mirrors.ustc.edu.cn/pypi/simple", "https://mirrors.aliyun.com/pypi/simple", "https://pypi.org/simple"])
+        appendInstall(`pip 源顺序（测速后）：${mirrors.join("  →  ")}\n`)
         for (let i = 0; i < mirrors.length && code !== 0; i++) {
           const m = mirrors[i]
           if (i > 0) appendInstall(`\n--- 换个镜像再试：${m} ---\n`)

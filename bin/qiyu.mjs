@@ -16,6 +16,7 @@ import { install } from '../src/install.mjs'
 import { preflight } from '../src/preflight.mjs'
 import { handover } from '../src/handover.mjs'
 import { stt } from '../src/stt.mjs'
+import { 测速报告 } from '../src/speed.mjs'
 import { 读配置, 配置文件路径 } from '../src/config.mjs'
 
 const 参数 = process.argv.slice(2)
@@ -74,10 +75,15 @@ const 帮助 = `
        --force                  已存在也覆盖（覆盖前自动备份）
 
   qiyu stt                     装语音转写（可选）：SenseVoice 模型（约 226MB）+ Python 依赖
+                               默认先测速、用最快的源下载；失败会自动换下一个源
        --check                 只看装没装
        --dir <目录>            模型放哪（默认 <DSH_HOME>/qiyu/models）
        --url <tar.bz2>         自己指定模型包地址（GitHub 拉不动时用）
+       --pip-index <地址>      自己指定 pip 源（不测速）
+       --no-speed              跳过测速，直接按候选顺序下（内网/代理环境）
        --skip-model / --skip-deps   只装其中一半
+
+  qiyu speed                    只测速：语音模型源 + pip 源，各自多快，不下任何东西
 
   qiyu config                   显示配置来源（文件 / 环境变量 / 默认值）
 
@@ -164,9 +170,15 @@ async function 主() {
       查: 有开关('--check'),
       dir: 取值('--dir'),
       url: 取值('--url'),
+      pipIndex: 取值('--pip-index'),
+      跳过测速: 有开关('--no-speed'),
       跳模型: 有开关('--skip-model'),
       跳依赖: 有开关('--skip-deps'),
     })
+  }
+
+  if (命令 === 'speed') {
+    return await 测速报告()
   }
 
   if (命令 === 'config') {

@@ -5,14 +5,17 @@
 //   而且干净机器上这一下要下载好几分钟，装完才发现用不上很浪费。
 //   所以做成"要用就跑一次"，doctor 会提示"语音转写未装"。
 //
-// 装完之后：`语音转写.py` 从 <DSH_HOME>/qiyu/models 读 model.int8.onnx + tokens.txt；
-// 桥的 voice.mjs 会去调它，收到的语音就能转成文字。
+// ⭐ 2026-10-26：下载前**先测速**。国内直连 GitHub / PyPI 经常只有几十 KB/s，
+//   镜像站可能几 MB/s。所以：候选表 → 并行测速 → 用最快的 → 失败再退回下一个。
+//   不想测速就加 --no-speed（内网/代理环境）。
 import { createWriteStream, existsSync, mkdirSync, readdirSync, copyFileSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir, homedir } from 'node:os'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { 跑 } from './run.mjs'
+import { 选最快源, 打印测速, 说速度 } from './speed.mjs'
+import { GitHub候选, PyPI源 } from './mirrors.mjs'
 
 const 默认模型 =
   process.env.QIYU_STT_URL ||
@@ -76,11 +79,33 @@ function 找文件(目录, 名) {
   return 候选[0] || ''
 }
 
+/** 下载一个文件到 目标；成功返回 true */
+async function 下载一个(url, 目标) {
+  console.log(`  ↓ ${url}`)
+  const 开始 = Date.now()
+  try {
+    const r = await fetch(url, { redirect: 'follow' })
+    if (!r.ok || !r.body) throw new Error('HTTP ' + r.status)
+    await pipeline(Readable.fromWeb(r.body), createWriteStream(目标))
+    const 字节 = statSync(目标).size
+    const 秒 = Math.max(1, (Date.now() - 开始) / 1000)
+    console.log(`  ✓ ${(字节 / 1024 / 1024).toFixed(1)} MB，平均 ${说速度(字节 / 1024 / 秒)}`)
+    return true
+  } catch (错) {
+    console.log('  ✗ ' + String((错 && 错.message) || 错))
+    try {
+      rmSync(目标, { force: true })
+    } catch (error) {}
+    return false
+  }
+}
+
 export async function stt(选项 = {}) {
   const 目录 = 模型目录(选项.dir)
   const 只查 = Boolean(选项.查)
   const 跳模型 = Boolean(选项.跳模型)
   const 跳依赖 = Boolean(选项.跳依赖)
+  const 跳过测速 = Boolean(选项.跳过测速)
 
   const 齐 = 模型齐了吗(目录)
   const py = 找Python()
@@ -92,31 +117,48 @@ export async function stt(选项 = {}) {
 
   if (只查) {
     if (!齐) console.log('· 要装：qiyu stt')
-    return 齐 ? 0 : 0
+    return 0
   }
 
   let 失败 = 0
 
   // ---- 1. 模型 ----
   if (!齐 && !跳模型) {
+    const 原地址 = 选项.url || 默认模型
+    const 候选 = GitHub候选(原地址)
+    let 顺序 = 候选
+
+    if (!跳过测速 && 候选.length > 1) {
+      console.log('\n· 先测速（每个源最多 8 秒，只取前 512KB）…')
+      const { 能用, 全部 } = await 选最快源(候选, { 超时: 8000, 样本: 512 * 1024 })
+      打印测速(全部, '模型源')
+      if (能用.length) {
+        顺序 = 能用.map((r) => ({ 名: r.名, url: r.url }))
+      } else {
+        console.log('  都测不通（可能被墙 / 需要代理）。先按原地址试一次，不行就用 --url。')
+      }
+    }
+
     const 临时 = join(tmpdir(), 'qiyu-stt-' + Date.now())
     mkdirSync(临时, { recursive: true })
     const 包 = join(临时, 'model.tar.bz2')
-    console.log(`\n· 下载模型（约 226 MB，第一次要几分钟）…`)
-    console.log(`  ${选项.url || 默认模型}`)
-    try {
-      const r = await fetch(选项.url || 默认模型, { redirect: 'follow' })
-      if (!r.ok || !r.body) throw new Error('HTTP ' + r.status)
-      await pipeline(Readable.fromWeb(r.body), createWriteStream(包))
-      const mb = (statSync(包).size / 1024 / 1024).toFixed(1)
-      console.log(`  下载完成：${mb} MB`)
-    } catch (错) {
-      console.log('✗ 模型下载失败：' + String(错.message || 错))
-      console.log('  可以自己下好之后用：qiyu stt --url <tar.bz2 的地址>')
-      console.log('  或者手动把 model.int8.onnx / tokens.txt 放进：' + 目录)
+
+    console.log(`\n· 下载模型（约 226 MB）…`)
+    let 下好了 = false
+    for (const c of 顺序) {
+      if (await 下载一个(c.url, 包)) {
+        下好了 = true
+        break
+      }
+      console.log(`  ${c.名} 不行，换下一个…`)
+    }
+    if (!下好了) {
+      console.log('✗ 所有源都没下成。可以自己下好之后：qiyu stt --url <tar.bz2 地址>')
+      console.log('  或手动把 model.int8.onnx / tokens.txt 放进：' + 目录)
       失败++
     }
-    if (existsSync(包) && statSync(包).size > 1024 * 1024) {
+
+    if (下好了 && existsSync(包) && statSync(包).size > 1024 * 1024) {
       const 解 = 解压(包, join(临时, 'x'))
       if (!解.ok) {
         console.log('✗ ' + 解.说)
@@ -146,12 +188,32 @@ export async function stt(选项 = {}) {
       console.log('\n✗ 没找到 Python，装不了依赖。先装 Python 3.10+（或用 DSH 自带的运行时）。')
       失败++
     } else {
+      let 索引 = 选项.pipIndex || ''
+      if (!索引 && !跳过测速) {
+        console.log('\n· 测速 pip 源…')
+        const 探针 = PyPI源.map((p) => ({ 名: p.名, url: p.url.replace(/\/$/, '') + '/sherpa-onnx/' }))
+        const { 全部, 能用 } = await 选最快源(探针, { 超时: 6000, 样本: 128 * 1024 })
+        打印测速(全部, 'pip 源')
+        if (能用.length) {
+          const 最快 = 能用[0]
+          const 对应 = PyPI源.find((p) => 最快.url.startsWith(p.url.replace(/\/$/, '')))
+          // 最快的是官方就不加 -i（省得绕一圈）；否则用镜像
+          if (对应 && 对应.url !== PyPI源[0].url) {
+            索引 = 对应.url
+            console.log(`  用：${对应.名}`)
+          }
+        }
+      }
+
       console.log(`\n· 装 Python 依赖（${依赖.join(' ')}）…`)
-      const r = 跑(py.python, ['-m', 'pip', 'install', '--upgrade', ...依赖], 900000)
+      const 参数 = ['-m', 'pip', 'install', '--upgrade', '--disable-pip-version-check']
+      if (索引) 参数.push('-i', 索引)
+      参数.push(...依赖)
+      const r = 跑(py.python, 参数, 900000)
       if (r.ok) console.log('✓ 依赖装好了')
       else {
         console.log('✗ 装依赖失败：' + String(r.错 || '').slice(0, 300))
-        console.log('  可以自己跑：' + py.python + ' -m pip install ' + 依赖.join(' '))
+        console.log('  可以自己跑：' + py.python + ' -m pip install ' + (索引 ? '-i ' + 索引 + ' ' : '') + 依赖.join(' '))
         失败++
       }
     }

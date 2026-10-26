@@ -106,9 +106,13 @@ npx dsh-qiyu-stack doctor
 npx dsh-qiyu-stack handover
 
 # 8. 可选：听语音 / 刷 B 站（不做也能收发文字）
-npx dsh-qiyu-stack stt          # 语音转写：226MB 模型 + Python 依赖
+npx dsh-qiyu-stack stt          # 语音转写：226MB 模型 + Python 依赖（会先测速，用最快的源）
+npx dsh-qiyu-stack speed        # 只看速：语音模型源 + pip 源各多快，不下任何东西
 # 刷 B 站：装好后让她第一次说「帮我刷下 XX 方向」，会自动跑 bili_setup；然后扫 B 站登录码
 ```
+
+> **下载慢的问题**：`stt` 和刷 B 站的依赖安装都会**先测速再挑源**（GitHub 加速前缀、pip 镜像），
+> 失败自动换下一个。想看当前网络下哪个源最快，跑 `qiyu speed`。
 
 > **用 npx 也没关系。** `install` 会先把运行时装一份到 `~/.dsh/qiyu/runtime/`，
 > profile 里的 `file:` 依赖指向那份**稳定副本**，不是 qiyu 包自己的位置。
@@ -128,6 +132,7 @@ npx dsh-qiyu-stack stt          # 语音转写：226MB 模型 + Python 依赖
 
 | 现象 | 十有八九是 | 怎么办 |
 |---|---|---|
+| **下载很慢 / 卡在下载** | 直连 GitHub、PyPI 都慢 | 跑 `qiyu speed` 看哪个源快；`qiyu stt` 会自动挑最快的，`--no-speed` 可关 |
 | 装完她不回消息 | **目标会话没选** / 总开关没开 | doctor 里这两项会是 fail/warn，按它说的改 |
 | QQ 里发消息没反应 | 好友备注跟身份表前缀对不上 | 把对方备注改成 `称呼.主人`；或设置里加一条身份表 |
 | `docker pull` 卡住 / 超时 | 国内拉不动 Docker Hub | `deploy --image <加速站前缀>/mlikiowa/napcat-docker:latest`，或在 Docker Engine 设置里加 `registry-mirrors` |
