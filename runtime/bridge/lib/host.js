@@ -565,7 +565,8 @@ export function apply(ctx) {
     } catch (error) {}
   }
   const 今日已用 = (uid) => Number(读额度()[String(uid)] || 0)
-  const 记一笔 = (uid) => {
+  // ⚠ 别把它叫回「记一笔」：限速.mjs 也导出一个 记一笔，同名会把限速记账吞掉（2026-10-26 事故）
+  const 记额度 = (uid) => {
     const u = 读额度()
     u[String(uid)] = Number(u[String(uid)] || 0) + 1
     写额度(u)
@@ -2034,7 +2035,7 @@ export function apply(ctx) {
           体.user_id = uid
           const r = await 发一个(配置.NapCat, 'send_private_msg', 体)
           if (!r.ok) return { ok: false, 说: `发送失败：${JSON.stringify(r.数据).slice(0, 120)}` }
-          记一笔(uid)
+          记额度(uid)
           记账(`qq_say：她主动发给 ${标签} →「${话.slice(0, 40)}」`)
           return { ok: true, 已发送: true, 说: `已发给${标签}` }
         } catch (error) {
@@ -2203,7 +2204,7 @@ export function apply(ctx) {
           const 体 = { user_id: uid, message: [{ type: 'image', data: { file: 'base64://' + 数据 } }] }
           const r = await 发一个(配置.NapCat, 'send_private_msg', 体)
           if (!r.ok) return { ok: false, 说: '发送失败：' + JSON.stringify(r.数据).slice(0, 140) }
-          记一笔(uid)
+          记额度(uid)
           记账('qq_sticker：她发了张「' + 命中名字 + '」给 ' + 标签)
           return { ok: true, 已发送: true, 说: '「' + 命中名字 + '」已经发给' + 标签 }
         } catch (error) {
@@ -2801,7 +2802,7 @@ export function apply(ctx) {
           const 体 = { group_id: 群号, message: 段 }
           const r = await 发一个(配置.NapCat, 'send_group_msg', 体)
           if (!r.ok) return { ok: false, 说: '发送失败：' + JSON.stringify(r.数据).slice(0, 140) }
-          记一笔(键)
+          记额度(键)
           记账('qq_group_say：她在「' + (群名们.get(群号) || 群号) + '」说：' + 发话.slice(0, 40))
           return { ok: true, 已发送: true, 说: '已经在「' + (群名们.get(群号) || 群号) + '」说了' }
         } catch (error) {
